@@ -354,7 +354,6 @@ x_horiz, y_horiz = x_horiz - x_horiz[i0], (y_horiz - y_horiz[i0]) * sg
 ths_ = th_vals * sg
 nx, ny = -np.sin(ths_), np.cos(ths_)
 
-# State DataFrame Profil Vertikal & Tanah Asli
 if "pvi_df" not in st.session_state:
     st.session_state.pvi_df = pd.DataFrame({
         "STA (m)": [0.0, 250.0, 500.0, 750.0],
@@ -375,12 +374,10 @@ else:
     z_elev = np.zeros_like(s_vals)
 
 # ----------------------------------------------------------------------------
-# 4. EXPORT ENGINE (CAD DXF & EXCEL BM 2021 - FORMAT LEMBAR HITUNGAN BERTAHAP)
+# 4. EXPORT ENGINE (EXCEL BM 2021)
 # ----------------------------------------------------------------------------
 def generate_excel_bm2021(r, pvi_data):
     wb = openpyxl.Workbook()
-    
-    # Styling lembar hitungan teknis (Times New Roman rapi)
     font_title = Font(name="Times New Roman", size=12, bold=True, color="000000")
     font_sec = Font(name="Times New Roman", size=11, bold=True, color="000000")
     font_reg = Font(name="Times New Roman", size=11, bold=False, color="000000")
@@ -395,7 +392,6 @@ def generate_excel_bm2021(r, pvi_data):
     med = Side(style="medium", color="000000")
     border_cell = Border(left=thin, right=thin, top=thin, bottom=thin)
     border_box = Border(left=med, right=med, top=med, bottom=med)
-
     align_c = openpyxl.styles.Alignment(horizontal="center", vertical="center", wrap_text=True)
 
     def apply_border_range(ws, cell_range, border):
@@ -403,17 +399,12 @@ def generate_excel_bm2021(r, pvi_data):
             for cell in row:
                 cell.border = border
 
-    # =========================================================================
-    # SHEET 1: PERHITUNGAN TIKUNGAN HORIZONTAL
-    # =========================================================================
     ws1 = wb.active
     ws1.title = "Tikungan Horisontal"
-
     col_widths = {"A": 6, "B": 12, "C": 12, "D": 11, "E": 11, "F": 11, "G": 5, "H": 12, "I": 12}
     for col_l, w in col_widths.items():
         ws1.column_dimensions[col_l].width = w
 
-    # Header Judul
     ws1.merge_cells("A1:I1")
     ws1["A1"] = f"PERHITUNGAN TIKUNGAN 1 ({r['jenis'].upper()})"
     ws1["A1"].font = font_title
@@ -422,7 +413,6 @@ def generate_excel_bm2021(r, pvi_data):
     ws1.row_dimensions[1].height = 26
     apply_border_range(ws1, "A1:I1", border_box)
 
-    # Tabel Data Input Awal (Baris 2 - 9)
     inputs_h = [
         (2, "Kecepatan Rencana (Vr)", r["V"], '0.0" km/jam"', fill_yellow, "=D2/3.6", '0.0000" m/s"'),
         (3, "Superelevasi maksimum (e_max)", r["emax"], "0.0%", fill_yellow, "=D3", "0.000"),
@@ -440,9 +430,8 @@ def generate_excel_bm2021(r, pvi_data):
         ws1.merge_cells(start_row=row_idx, start_column=4, end_row=row_idx, end_column=6)
         ws1.merge_cells(start_row=row_idx, start_column=8, end_row=row_idx, end_column=9)
 
-        c_lbl = ws1.cell(row=row_idx, column=1, value=label)
-        c_lbl.font = font_reg
-        c_lbl.alignment = align_c
+        ws1.cell(row=row_idx, column=1, value=label).font = font_reg
+        ws1.cell(row=row_idx, column=1).alignment = align_c
 
         c_val = ws1.cell(row=row_idx, column=4, value=val_in)
         c_val.font = font_reg
@@ -452,29 +441,24 @@ def generate_excel_bm2021(r, pvi_data):
             for c_i in range(4, 7):
                 ws1.cell(row=row_idx, column=c_i).fill = fill_in
 
-        c_eq = ws1.cell(row=row_idx, column=7, value="=")
-        c_eq.font = font_bold
-        c_eq.alignment = align_c
+        ws1.cell(row=row_idx, column=7, value="=").font = font_bold
+        ws1.cell(row=row_idx, column=7).alignment = align_c
 
         c_res = ws1.cell(row=row_idx, column=8, value=formula_h)
         c_res.font = font_reg
         c_res.alignment = align_c
         c_res.number_format = fmt_h
-
         apply_border_range(ws1, f"A{row_idx}:I{row_idx}", border_cell)
 
     def add_step_block(ws, start_r, step_no, title_txt, rows_spec):
-        """Helper untuk membuat blok langkah bernomor seperti pada gambar referensi."""
         end_r = start_r + len(rows_spec)
         ws.merge_cells(start_row=start_r, start_column=1, end_row=end_r, end_column=1)
-        c_no = ws.cell(row=start_r, column=1, value=step_no)
-        c_no.font = font_bold
-        c_no.alignment = align_c
+        ws.cell(row=start_r, column=1, value=step_no).font = font_bold
+        ws.cell(row=start_r, column=1).alignment = align_c
 
         ws.merge_cells(start_row=start_r, start_column=2, end_row=start_r, end_column=9)
-        c_tit = ws.cell(row=start_r, column=2, value=title_txt)
-        c_tit.font = font_sec
-        c_tit.alignment = align_c
+        ws.cell(row=start_r, column=2, value=title_txt).font = font_sec
+        ws.cell(row=start_r, column=2).alignment = align_c
         ws.row_dimensions[start_r].height = 22
         for c_i in range(2, 10):
             ws.cell(row=start_r, column=c_i).fill = fill_cream
@@ -484,18 +468,15 @@ def generate_excel_bm2021(r, pvi_data):
             ws.row_dimensions[cur_r].height = 24
             if sub_hdr:
                 ws.merge_cells(start_row=cur_r, start_column=2, end_row=cur_r, end_column=9)
-                c_sh = ws.cell(row=cur_r, column=2, value=rumus_txt)
-                c_sh.font = font_reg
-                c_sh.alignment = align_c
+                ws.cell(row=cur_r, column=2, value=rumus_txt).font = font_reg
+                ws.cell(row=cur_r, column=2).alignment = align_c
             else:
                 ws.merge_cells(start_row=cur_r, start_column=2, end_row=cur_r, end_column=6)
-                c_rm = ws.cell(row=cur_r, column=2, value=rumus_txt)
-                c_rm.font = font_italic
-                c_rm.alignment = align_c
+                ws.cell(row=cur_r, column=2, value=rumus_txt).font = font_italic
+                ws.cell(row=cur_r, column=2).alignment = align_c
 
-                c_eq = ws.cell(row=cur_r, column=7, value="=")
-                c_eq.font = font_bold
-                c_eq.alignment = align_c
+                ws.cell(row=cur_r, column=7, value="=").font = font_bold
+                ws.cell(row=cur_r, column=7).alignment = align_c
 
                 ws.merge_cells(start_row=cur_r, start_column=8, end_row=cur_r, end_column=9)
                 c_vl = ws.cell(row=cur_r, column=8, value=formula_val)
@@ -519,29 +500,20 @@ def generate_excel_bm2021(r, pvi_data):
         return end_r + 1
 
     curr = 10
-    # Step 1: FMAX -> H11
     curr = add_step_block(ws1, curr, 1, "FMAX (Koefisien Gesek Melintang Maksimum)", [
         (False, "f_max = -0.00065·Vr + 0.192 (Vr < 80) atau -0.00125·Vr + 0.24", "=IF(D2<80, -0.00065*D2+0.192, -0.00125*D2+0.24)", "0.0000", False)
     ])
-
-    # Step 2: Rmin -> H13
     curr = add_step_block(ws1, curr, 2, "MENGHITUNG Rmin", [
         (False, "Rmin = Vr² / (127 × (e_max + f_max))", "=D2^2/(127*(H3+H11))", '0.0000" m"', False)
     ])
-
-    # Step 3: R rencana -> H15
     curr = add_step_block(ws1, curr, 3, "MENENTUKAN JARI-JARI RENCANA (Rc)", [
         (False, "Rc rencana ≥ Rmin, diambil Rc rencana", r["Rc"], '0.00" m"', True)
     ])
-
-    # Step 4: Superelevasi desain (e) -> Dmax=H17, D=H18, e=H19
     curr = add_step_block(ws1, curr, 4, "MENGHITUNG SUPERELEVASI DESAIN (e)", [
         (False, "Dmax = 181913.53 × (e_max + f_max) / Vr²", "=181913.53*(H3+H11)/(D2^2)", "0.0000", False),
         (False, "D = 1432.39 / Rc", "=1432.39/H15", "0.0000", False),
         (False, "e = MAX(en, -e_max·(D/Dmax)² + 2·e_max·(D/Dmax))", "=MAX(H7, -H3*(H18/H17)^2 + 2*H3*(H18/H17))", "0.00%", False),
     ])
-
-    # Step 5: Ls min -> H22, H24, H26
     curr = add_step_block(ws1, curr, 5, "MENGHITUNG Ls min (Lengkung Peralihan Minimum)", [
         (True, "Berdasarkan waktu tempuh maksimum lengkung peralihan (3 detik)", None, None, False),
         (False, "Ls = (Vr / 3.6) × T", "=(D2/3.6)*D5", "0.0000", False),
@@ -550,63 +522,39 @@ def generate_excel_bm2021(r, pvi_data):
         (True, "Berdasarkan tingkat pencapaian perubahan kelandaian", None, None, False),
         (False, "Ls = ((e + en) × Vr) / (3.6 × re)", "=((H19+H7)*D2)/(3.6*H9)", "0.0000", False),
     ])
-
-    # Step 6: Ls rencana -> H28
     curr = add_step_block(ws1, curr, 6, "MENENTUKAN Ls RENCANA (Dibulatkan kelipatan 5 m)", [
         (False, "Ls rencana ≥ MAX(Ls1, Ls2, Ls3), diambil Ls rencana", "=CEILING(MAX(H22,H24,H26), 5)", '0.00" m"', True)
     ])
-
-    # Step 7: Theta_s -> H30
     curr = add_step_block(ws1, curr, 7, "Menghitung θs (deflection angle tiap spiral)", [
         (False, "θs = (Ls × 90) / (π × Rc)", "=(H28*90)/(PI()*H15)", '0.0000"°"', False)
     ])
-
-    # Step 8: Theta_c -> H32
     curr = add_step_block(ws1, curr, 8, "Menghitung θc (sudut lingkaran / central angle busur)", [
         (False, "θc = Δ - 2·θs", "=IF(H28=0, D4, D4-2*H30)", '0.0000"°"', False)
     ])
-
-    # Step 9: Lc -> H34
     curr = add_step_block(ws1, curr, 9, "Menghitung Panjang Busur Lingkaran (Lc)", [
         (False, "Lc = (θc / 360) × 2π·Rc", "=(H32/360)*2*PI()*H15", '0.0000" m"', False)
     ])
-
-    # Step 10: Ltotal -> H36
     curr = add_step_block(ws1, curr, 10, "Menentukan L total", [
         (False, "Ltotal = Lc + 2·Ls", "=H34+2*H28", '0.0000" m"', False)
     ])
-
-    # Step 11: Xs -> H38
     curr = add_step_block(ws1, curr, 11, "Menentukan Xs", [
         (False, "Xs = Ls × (1 - Ls² / (40·Rc²))", "=H28*(1-(H28^2)/(40*(H15^2)))", '0.0000" m"', False)
     ])
-
-    # Step 12: Ys -> H40
     curr = add_step_block(ws1, curr, 12, "Menentukan Ys", [
         (False, "Ys = Ls² / (6·Rc)", "=(H28^2)/(6*H15)", '0.0000" m"', False)
     ])
-
-    # Step 13: P -> H42
     curr = add_step_block(ws1, curr, 13, "Menentukan P (Pergeseran Tangen)", [
         (False, "P = Ys - Rc × (1 - cos(θs))", "=H40-H15*(1-COS(RADIANS(H30)))", '0.0000" m"', False)
     ])
-
-    # Step 14: K -> H44
     curr = add_step_block(ws1, curr, 14, "Menentukan K", [
         (False, "K = Xs - Rc × sin(θs)", "=H38-H15*SIN(RADIANS(H30))", '0.0000" m"', False)
     ])
-
-    # Step 15: Es -> H46
     curr = add_step_block(ws1, curr, 15, "Menentukan Es (Jarak Eksternal)", [
         (False, "Es = (Rc + P) / cos(Δ/2) - Rc", "=(H15+H42)/COS(RADIANS(D4/2))-H15", '0.0000" m"', False)
     ])
-
-    # Step 16: Ts -> H48
     curr = add_step_block(ws1, curr, 16, "Menentukan Ts (Panjang Tangen)", [
         (False, "Ts = (Rc + P) × tan(Δ/2) + K", "=(H15+H42)*TAN(RADIANS(D4/2))+H44", '0.0000" m"', False)
     ])
-
-    # Step 17: Stasioning & V_aman -> H50, H51, H52, H53
     curr = add_step_block(ws1, curr, 17, "Kontrol Kecepatan Aman & Stasioning", [
         (False, "V_aman = √(127 × Rc × (e + f_max))", "=SQRT(127*H15*(H19+H11))", '0.00" km/jam"', False),
         (False, "STA PI (Input Desain)", r["sta_pi"], '0.00" m"', True),
@@ -614,206 +562,12 @@ def generate_excel_bm2021(r, pvi_data):
         (False, "STA Akhir Tikungan (ST / CT) = STA Awal + Ltotal", "=H52+H36", '0.00" m"', False),
     ])
 
-    # =========================================================================
-    # SHEET 2: PERHITUNGAN ALINYEMEN VERTIKAL (FORMAT LANGKAH DEMI LANGKAH)
-    # =========================================================================
-    ws2 = wb.create_sheet(title="Alinyemen Vertikal")
-    for col_l, w in col_widths.items():
-        ws2.column_dimensions[col_l].width = w
-
-    ws2.merge_cells("A1:I1")
-    ws2["A1"] = "PERHITUNGAN ALINYEMEN VERTIKAL (LENGKUNG VERTIKAL PARABOLA)"
-    ws2["A1"].font = font_title
-    ws2["A1"].fill = fill_cream
-    ws2["A1"].alignment = align_c
-    ws2.row_dimensions[1].height = 26
-    apply_border_range(ws2, "A1:I1", border_box)
-
-    # Parameter Dasar Alinyemen Vertikal (Baris 2 - 5)
-    inputs_v = [
-        (2, "Kecepatan Rencana (Vr)", r["V"], '0.0" km/jam"', fill_yellow, "=D2/3.6", '0.0000" m/s"'),
-        (3, "Waktu Reaksi Pengemudi (t)", 2.5, '0.0" s"', fill_grey, "=D3", '0.0" s"'),
-        (4, "Koefisien Gesek Memanjang (fm)", 0.40, "0.00", fill_grey, "=D4", "0.00"),
-        (5, "Jarak Pandang Henti (Jh)", "=0.278*D2*D3 + (D2^2)/(254*D4)", '0.00" m"', None, "=D5", '0.00" m"'),
-    ]
-
-    for row_idx, label, val_in, fmt_in, fill_in, formula_h, fmt_h in inputs_v:
-        ws2.row_dimensions[row_idx].height = 22
-        ws2.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=3)
-        ws2.merge_cells(start_row=row_idx, start_column=4, end_row=row_idx, end_column=6)
-        ws2.merge_cells(start_row=row_idx, start_column=8, end_row=row_idx, end_column=9)
-
-        c_lbl = ws2.cell(row=row_idx, column=1, value=label)
-        c_lbl.font = font_reg
-        c_lbl.alignment = align_c
-
-        c_val = ws2.cell(row=row_idx, column=4, value=val_in)
-        c_val.font = font_reg
-        c_val.alignment = align_c
-        c_val.number_format = fmt_in
-        if fill_in:
-            for c_i in range(4, 7):
-                ws2.cell(row=row_idx, column=c_i).fill = fill_in
-
-        c_eq = ws2.cell(row=row_idx, column=7, value="=")
-        c_eq.font = font_bold
-        c_eq.alignment = align_c
-
-        c_res = ws2.cell(row=row_idx, column=8, value=formula_h)
-        c_res.font = font_bold if row_idx == 5 else font_reg
-        c_res.alignment = align_c
-        c_res.number_format = fmt_h
-
-        apply_border_range(ws2, f"A{row_idx}:I{row_idx}", border_cell)
-
-    # Loop untuk setiap PVI yang memiliki lengkung vertikal
-    curr_v = 7
-    if pvi_data is not None and len(pvi_data["kurva"]) > 0:
-        for idx_k, k in enumerate(pvi_data["kurva"], start=1):
-            ws2.merge_cells(start_row=curr_v, start_column=1, end_row=curr_v, end_column=9)
-            c_pvi_banner = ws2.cell(
-                row=curr_v, column=1,
-                value=f"PERHITUNGAN LENGKUNG VERTIKAL PVI-{idx_k} ({k['jenis'].upper()})"
-            )
-            c_pvi_banner.font = font_title
-            c_pvi_banner.fill = fill_cream
-            c_pvi_banner.alignment = align_c
-            ws2.row_dimensions[curr_v].height = 24
-            apply_border_range(ws2, f"A{curr_v}:I{curr_v}", border_box)
-            curr_v += 1
-
-            r_sta = curr_v
-            r_el = curr_v + 1
-            r_g1 = curr_v + 2
-            r_g2 = curr_v + 3
-
-            pvi_in_rows = [
-                (r_sta, f"STA PVI-{idx_k}", k["sta"], '0.00" m"', fill_yellow, f"=D{r_sta}", '0.00" m"'),
-                (r_el, f"Elevasi PVI-{idx_k}", k["el"], '0.000" m"', fill_yellow, f"=D{r_el}", '0.000" m"'),
-                (r_g1, "Kelandaian Masuk (g1)", k["g1"], "0.00%", fill_yellow, f"=D{r_g1}*100", '0.00" %"'),
-                (r_g2, "Kelandaian Keluar (g2)", k["g2"], "0.00%", fill_yellow, f"=D{r_g2}*100", '0.00" %"'),
-            ]
-            for r_i, lbl_i, v_i, fmt_i, fl_i, f_h, fmt_h in pvi_in_rows:
-                ws2.row_dimensions[r_i].height = 22
-                ws2.merge_cells(start_row=r_i, start_column=1, end_row=r_i, end_column=3)
-                ws2.merge_cells(start_row=r_i, start_column=4, end_row=r_i, end_column=6)
-                ws2.merge_cells(start_row=r_i, start_column=8, end_row=r_i, end_column=9)
-
-                ws2.cell(row=r_i, column=1, value=lbl_i).alignment = align_c
-                ws2.cell(row=r_i, column=1).font = font_reg
-
-                cv = ws2.cell(row=r_i, column=4, value=v_i)
-                cv.font = font_reg
-                cv.alignment = align_c
-                cv.number_format = fmt_i
-                for ci in range(4, 7):
-                    ws2.cell(row=r_i, column=ci).fill = fl_i
-
-                ceq = ws2.cell(row=r_i, column=7, value="=")
-                ceq.font = font_bold
-                ceq.alignment = align_c
-
-                ch = ws2.cell(row=r_i, column=8, value=f_h)
-                ch.font = font_reg
-                ch.alignment = align_c
-                ch.number_format = fmt_h
-
-                apply_border_range(ws2, f"A{r_i}:I{r_i}", border_cell)
-
-            curr_v = r_g2 + 1
-
-            # Step 1 Vertikal: Perbedaan Aljabar Kelandaian (A)
-            r_A = curr_v + 1
-            curr_v = add_step_block(ws2, curr_v, 1, "Menghitung Perbedaan Aljabar Kelandaian (A)", [
-                (False, "A = g2 - g1 (%)", f"=H{r_g2}-H{r_g1}", '0.00" %"', False)
-            ])
-
-            # Step 2 Vertikal: Panjang Lengkung Vertikal Minimum (Lv min) berdasarkan Jh
-            r_lv_jh = curr_v + 2
-            r_lv_vr = curr_v + 4
-            curr_v = add_step_block(ws2, curr_v, 2, "Menghitung Panjang Lengkung Vertikal Minimum (Lv min)", [
-                (True, "Berdasarkan Jarak Pandang Henti (Jh) — Bina Marga", None, None, False),
-                (
-                    False,
-                    "Cembung (A<0): |A|·Jh²/399  |  Cekung (A>0): |A|·Jh²/(120+3.5·Jh)",
-                    f"=IF(H{r_A}<0, IF(ABS(H{r_A})*(H5^2)/399 < H5, 2*H5 - 399/ABS(H{r_A}), ABS(H{r_A})*(H5^2)/399), IF(ABS(H{r_A})*(H5^2)/(120+3.5*H5) < H5, 2*H5 - (120+3.5*H5)/ABS(H{r_A}), ABS(H{r_A})*(H5^2)/(120+3.5*H5)))",
-                    '0.00" m"',
-                    False
-                ),
-                (True, "Berdasarkan Syarat Kenyamanan & Kecepatan Rencana (Vr)", None, None, False),
-                (False, "Lv_syarat = MAX(0.6 × Vr, Vr × 3 / 3.6)", "=MAX(0.6*D2, D2*3/3.6)", '0.00" m"', False),
-            ])
-
-            # Step 3 Vertikal: Menentukan Lv Rencana (Dibulatkan kelipatan 10 m)
-            r_lv_pakai = curr_v + 1
-            curr_v = add_step_block(ws2, curr_v, 3, "Menentukan Panjang Lengkung Vertikal Rencana (Lv)", [
-                (False, "Lv rencana ≥ MAX(Lv_Jh, Lv_syarat), diambil Lv rencana", f"=CEILING(MAX(H{r_lv_jh}, H{r_lv_vr}), 10)", '0.00" m"', True)
-            ])
-
-            # Step 4 Vertikal: Pergeseran Vertikal (Ev)
-            curr_v = add_step_block(ws2, curr_v, 4, "Menghitung Pergeseran Vertikal dari PVI (Ev)", [
-                (False, "Ev = (|A| × Lv) / 800", f"=(ABS(H{r_A})*H{r_lv_pakai})/800", '0.000" m"', False)
-            ])
-
-            # Step 5 Vertikal: Stasioning & Elevasi Titik Penting (BVC, PVI, EVC)
-            curr_v = add_step_block(ws2, curr_v, 5, "Menentukan Stasioning & Elevasi Titik Penting (BVC & EVC)", [
-                (False, "STA BVC (Awal Lengkung) = STA PVI - Lv/2", f"=D{r_sta}-(H{r_lv_pakai}/2)", '0.00" m"', False),
-                (False, "STA EVC (Akhir Lengkung) = STA PVI + Lv/2", f"=D{r_sta}+(H{r_lv_pakai}/2)", '0.00" m"', False),
-                (False, "Elevasi BVC = Elevasi PVI - g1 × (Lv/2)", f"=D{r_el}-D{r_g1}*(H{r_lv_pakai}/2)", '0.000" m"', False),
-                (False, "Elevasi EVC = Elevasi PVI + g2 × (Lv/2)", f"=D{r_el}+D{r_g2}*(H{r_lv_pakai}/2)", '0.000" m"', False),
-            ])
-
-            curr_v += 1  # Jarak 1 baris antar PVI
-    else:
-        ws2["A7"] = "Tidak ada titik belok vertikal (PVI) dengan perubahan kelandaian."
-
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
 
-def export_dxf_full_autocad(x_h, y_h, z_e, s_v, r_dict, B_w, nx_v, ny_v):
-    lines = [
-        "0", "SECTION", "2", "HEADER", "0", "ENDSEC",
-        "0", "SECTION", "2", "TABLES",
-        "0", "TABLE", "2", "LAYER",
-        "0", "LAYER", "2", "AS_JALAN_3D", "70", "0", "62", "7", "6", "CONTINUOUS",
-        "0", "LAYER", "2", "TEPI_KIRI_3D", "70", "0", "62", "1", "6", "CONTINUOUS",
-        "0", "LAYER", "2", "TEPI_KANAN_3D", "70", "0", "62", "5", "6", "CONTINUOUS",
-        "0", "LAYER", "2", "DENAH_ANNOTATION", "70", "0", "62", "2", "6", "CONTINUOUS",
-        "0", "LAYER", "2", "PROFIL_VERTIKAL", "70", "0", "62", "3", "6", "CONTINUOUS",
-        "0", "ENDTAB", "0", "ENDSEC",
-        "0", "SECTION", "2", "ENTITIES"
-    ]
-
-    lines.extend(["0", "POLYLINE", "8", "AS_JALAN_3D", "66", "1", "70", "8"])
-    for x, y, z in zip(x_h, y_h, z_e):
-        lines.extend(["0", "VERTEX", "8", "AS_JALAN_3D", "10", f"{float(x):.3f}", "20", f"{float(y):.3f}", "30", f"{float(z):.3f}"])
-    lines.extend(["0", "SEQEND"])
-
-    xl, yl = x_h + (B_w / 2) * nx_v, y_h + (B_w / 2) * ny_v
-    xr, yr = x_h - (B_w / 2) * nx_v, y_h - (B_w / 2) * ny_v
-
-    lines.extend(["0", "POLYLINE", "8", "TEPI_KIRI_3D", "66", "1", "70", "8"])
-    for x, y, z in zip(xl, yl, z_e):
-        lines.extend(["0", "VERTEX", "8", "TEPI_KIRI_3D", "10", f"{float(x):.3f}", "20", f"{float(y):.3f}", "30", f"{float(z):.3f}"])
-    lines.extend(["0", "SEQEND"])
-
-    lines.extend(["0", "POLYLINE", "8", "TEPI_KANAN_3D", "66", "1", "70", "8"])
-    for idx_pt, (x, z) in enumerate(zip(xr, z_e)):
-        lines.extend(["0", "VERTEX", "8", "TEPI_KANAN_3D", "10", f"{float(x):.3f}", "20", f"{float(yr[idx_pt]):.3f}", "30", f"{float(z):.3f}"])
-    lines.extend(["0", "SEQEND"])
-
-    y_off = -150.0
-    lines.extend(["0", "POLYLINE", "8", "PROFIL_VERTIKAL", "66", "1", "70", "0"])
-    for s, z in zip(s_v, z_e):
-        lines.extend(["0", "VERTEX", "8", "PROFIL_VERTIKAL", "10", f"{float(s):.3f}", "20", f"{y_off + float(z):.3f}", "30", "0.0"])
-    lines.extend(["0", "SEQEND"])
-
-    lines.extend(["0", "ENDSEC", "0", "EOF"])
-    return "\n".join(lines)
-
 # ----------------------------------------------------------------------------
-# 5. TAMPILAN APLIKASI UTAMA
+# 5. TAMPILAN APLIKASI UTAMA (DENGAN TAB GAMBAR AUTOCAD & PARAMETER)
 # ----------------------------------------------------------------------------
 st.markdown("<h1 style='color: #3A0056; text-align: center; font-weight: 800;'>🌸 Geometri Jalan Interaktif & Simulasi 3D</h1>", unsafe_allow_html=True)
 
@@ -821,74 +575,53 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📍 Denah Tikungan (2D)", 
     "📈 Diagram Superelevasi", 
     "🚘 Simulasi 3D Mobil Jalan", 
-    "📊 Profil Memanjang & Ekspor CAD",
+    "📐 Gambar AutoCAD & Parameter",
     "📋 Tabel Hitungan & Excel"
 ])
 
 # ----------------------------------------------------------------------------
-# TAB 1: DENAH TIKUNGAN 2D (DETAIL SEPERTI REFERENSI)
+# TAB 1: DENAH TIKUNGAN 2D
 # ----------------------------------------------------------------------------
 with tab1:
     st.markdown("<h3 style='color: #3A0056;'>📍 Visualisasi Denah Trase Tikungan 2D</h3>", unsafe_allow_html=True)
     
     fig_2d = go.Figure()
-    
-    # 1. Badan Jalan (Arsiran Abu-abu Lembut) + Tepi Kiri & Kanan
     xl, yl = x_horiz + (B / 2) * nx, y_horiz + (B / 2) * ny
     xr, yr = x_horiz - (B / 2) * nx, y_horiz - (B / 2) * ny
     
     fig_2d.add_trace(go.Scatter(
         x=np.concatenate([xl, xr[::-1]]),
         y=np.concatenate([yl, yr[::-1]]),
-        fill='toself',
-        fillcolor='rgba(200, 200, 210, 0.25)',
-        line=dict(color='rgba(0,0,0,0)'),
-        name='Badan Perkerasan',
-        hoverinfo='skip'
+        fill='toself', fillcolor='rgba(200, 200, 210, 0.25)',
+        line=dict(color='rgba(0,0,0,0)'), name='Badan Perkerasan', hoverinfo='skip'
     ))
     fig_2d.add_trace(go.Scatter(x=xl, y=yl, mode='lines', name='Tepi Perkerasan', line=dict(color='#616161', width=1.5)))
     fig_2d.add_trace(go.Scatter(x=xr, y=yr, mode='lines', showlegend=False, line=dict(color='#616161', width=1.5)))
-    
-    # 2. As Jalan (Hitam Pekat & Jelas)
     fig_2d.add_trace(go.Scatter(x=x_horiz, y=y_horiz, mode='lines', name='As jalan', line=dict(color='#111111', width=3)))
     
-    # 3. Garis Singgung Tangen (Biru Putus-putus) & Titik PI (Kotak Hitam)
     idx_start = np.argmin(np.abs(s_vals - 0))
     idx_end = np.argmin(np.abs(s_vals - r["Ltot"]))
-    
     x_ts, y_ts = x_horiz[idx_start], y_horiz[idx_start]
     x_st, y_st = x_horiz[idx_end], y_horiz[idx_end]
-    
     x_pi = x_ts + r["T"] * np.cos(ths_[idx_start])
     y_pi = y_ts + r["T"] * np.sin(ths_[idx_start])
     
     fig_2d.add_trace(go.Scatter(
-        x=[x_ts, x_pi, x_st],
-        y=[y_ts, y_pi, y_st],
-        mode='lines',
-        name='Garis singgung',
-        line=dict(color='#1565C0', width=1.8, dash='dash')
+        x=[x_ts, x_pi, x_st], y=[y_ts, y_pi, y_st],
+        mode='lines', name='Garis singgung', line=dict(color='#1565C0', width=1.8, dash='dash')
     ))
-    
     fig_2d.add_trace(go.Scatter(
-        x=[x_pi], y=[y_pi],
-        mode='markers',
-        name='Titik PI',
+        x=[x_pi], y=[y_pi], mode='markers', name='Titik PI',
         marker=dict(size=10, color='#111111', symbol='square')
     ))
-    
     fig_2d.add_annotation(
         x=x_pi, y=y_pi,
         text=f"<b>PI</b><br>Δ = {r['delta']:.1f}°<br>STA {sta_str(r['sta_pi'])}",
-        showarrow=False,
-        xshift=12, yshift=32 if arah == "Kanan" else -32,
-        xanchor="left",
-        font=dict(color="#111111", size=12),
-        bgcolor="rgba(255,255,255,0.92)",
-        bordercolor="#BDBDBD", borderwidth=1, borderpad=4
+        showarrow=False, xshift=12, yshift=32 if arah == "Kanan" else -32,
+        xanchor="left", font=dict(color="#111111", size=12),
+        bgcolor="rgba(255,255,255,0.92)", bordercolor="#BDBDBD", borderwidth=1, borderpad=4
     )
     
-    # 4. Titik Pusat Lingkaran (O) & Garis Jari-jari Hijau Putus-putus
     if r["jenis"].startswith("Full"):
         mid_idx = idx_start
     else:
@@ -898,70 +631,26 @@ with tab1:
     y_center = y_horiz[mid_idx] + sg * r["Rc"] * ny[mid_idx]
     
     fig_2d.add_trace(go.Scatter(
-        x=[x_horiz[mid_idx], x_center],
-        y=[y_horiz[mid_idx], y_center],
-        mode='lines',
-        name=f'Jari-jari Rc = {r["Rc"]:.0f} m',
+        x=[x_horiz[mid_idx], x_center], y=[y_horiz[mid_idx], y_center],
+        mode='lines', name=f'Jari-jari Rc = {r["Rc"]:.0f} m',
         line=dict(color='#2E7D32', width=1.5, dash='dot')
     ))
     fig_2d.add_trace(go.Scatter(
-        x=[x_center], y=[y_center],
-        mode='markers',
-        name='Pusat Lengkungan (O)',
+        x=[x_center], y=[y_center], mode='markers', name='Pusat Lengkungan (O)',
         marker=dict(size=13, color='#2E7D32', symbol='cross-thin', line=dict(width=2, color='#2E7D32'))
     ))
     fig_2d.add_annotation(
-        x=x_center, y=y_center,
-        text=f"<b>R = {r['Rc']:.0f} m</b>",
-        showarrow=False,
-        xshift=14, xanchor="left",
-        font=dict(color="#1B5E20", size=12),
-        bgcolor="rgba(255,255,255,0.9)",
-        borderpad=2
+        x=x_center, y=y_center, text=f"<b>R = {r['Rc']:.0f} m</b>",
+        showarrow=False, xshift=14, xanchor="left",
+        font=dict(color="#1B5E20", size=12), bgcolor="rgba(255,255,255,0.9)", borderpad=2
     )
-    
-    # 5. Garis Patok Stasioning Minor setiap 50 m (0+050, 0+100, dst.)
-    sta_min_plot = math.ceil((r["sta_awal"] + s_vals[0]) / 50.0) * 50.0
-    sta_max_plot = math.floor((r["sta_awal"] + s_vals[-1]) / 50.0) * 50.0
-    tick_stas = np.arange(sta_min_plot, sta_max_plot + 1, 50.0)
-    
-    tick_half_len = max(B * 0.85, 5.5)
-    for st_val in tick_stas:
-        s_rel = st_val - r["sta_awal"]
-        if s_vals[0] <= s_rel <= s_vals[-1]:
-            idx_t = np.argmin(np.abs(s_vals - s_rel))
-            xt0, yt0 = x_horiz[idx_t], y_horiz[idx_t]
-            nxt, nyt = nx[idx_t], ny[idx_t]
-            
-            fig_2d.add_trace(go.Scatter(
-                x=[xt0 - tick_half_len * nxt, xt0 + tick_half_len * nxt],
-                y=[yt0 - tick_half_len * nyt, yt0 + tick_half_len * nyt],
-                mode='lines',
-                showlegend=False,
-                hoverinfo='skip',
-                line=dict(color='#757575', width=1.2)
-            ))
-            lbl_side = -sg
-            fig_2d.add_annotation(
-                x=xt0 + lbl_side * (tick_half_len + 2.5) * nxt,
-                y=yt0 + lbl_side * (tick_half_len + 2.5) * nyt,
-                text=sta_str(st_val, d=0),
-                showarrow=False,
-                font=dict(color="#424242", size=10),
-                bgcolor="rgba(255,255,255,0.75)",
-                borderpad=1
-            )
 
-    # 6. Titik-Titik Utama Tikungan (Merah Bulat + Label Merah Tua Berlatar Putih)
     fc = r["jenis"].startswith("Full")
     is_ss = r["jenis"].startswith("Spiral-Spiral")
+    pts_x, pts_y = [x_ts, x_st], [y_ts, y_st]
+    pts_lbls = [f"<b>TC</b><br>{sta_str(r['sta_awal'])}", f"<b>CT</b><br>{sta_str(r['sta_akhir'])}"] if fc else [f"<b>TS</b><br>{sta_str(r['sta_awal'])}", f"<b>ST</b><br>{sta_str(r['sta_akhir'])}"]
     
-    pts_x = [x_ts, x_st]
-    pts_y = [y_ts, y_st]
-    if fc:
-        pts_lbls = [f"<b>TC</b><br>{sta_str(r['sta_awal'])}", f"<b>CT</b><br>{sta_str(r['sta_akhir'])}"]
-    else:
-        pts_lbls = [f"<b>TS</b><br>{sta_str(r['sta_awal'])}", f"<b>ST</b><br>{sta_str(r['sta_akhir'])}"]
+    if not fc:
         if is_ss:
             idx_mid = np.argmin(np.abs(s_vals - r["Ls"]))
             pts_x.append(x_horiz[idx_mid])
@@ -978,57 +667,28 @@ with tab1:
             ])
 
     fig_2d.add_trace(go.Scatter(
-        x=pts_x, y=pts_y,
-        mode='markers',
-        name='Titik Utama (TS/SC/CS/ST)',
+        x=pts_x, y=pts_y, mode='markers', name='Titik Utama',
         marker=dict(size=10, color='#D50000', symbol='circle', line=dict(width=1.5, color='#FFFFFF'))
     ))
-    
     for px, py, plbl in zip(pts_x, pts_y, pts_lbls):
         fig_2d.add_annotation(
-            x=px, y=py,
-            text=plbl,
-            showarrow=False,
+            x=px, y=py, text=plbl, showarrow=False,
             yshift=-26 if arah == "Kanan" else 26,
             font=dict(color="#8E0000", size=11),
-            bgcolor="rgba(255,255,255,0.92)",
-            bordercolor="#FFCDD2", borderwidth=1, borderpad=3
+            bgcolor="rgba(255,255,255,0.92)", bordercolor="#FFCDD2", borderwidth=1, borderpad=3
         )
 
-    arah_txt = "tikungan ke kiri" if arah == "Kiri" else "tikungan ke kanan"
     fig_2d.update_layout(
-        title=dict(
-            text=f"Denah Trase Tikungan - {r['jenis']} ({arah_txt})",
-            font=dict(color='#111111', size=17),
-            x=0.5, xanchor='center'
-        ),
-        xaxis=dict(
-            title="x (m)", title_font=dict(color='#111111', size=13),
-            tickfont=dict(color='#222222'), gridcolor='#E0E0E0',
-            showline=True, linecolor='#333333', mirror=True
-        ),
-        yaxis=dict(
-            title="y (m)", title_font=dict(color='#111111', size=13),
-            tickfont=dict(color='#222222'), gridcolor='#E0E0E0',
-            showline=True, linecolor='#333333', mirror=True,
-            scaleanchor="x", scaleratio=1
-        ),
-        legend=dict(
-            bgcolor="rgba(255, 255, 255, 0.96)",
-            bordercolor="#9E9E9E",
-            borderwidth=1,
-            font=dict(color="#111111", size=12),
-            x=0.99, y=0.99, xanchor="right", yanchor="top"
-        ),
-        plot_bgcolor="#FFFFFF",
-        paper_bgcolor="#FFFFFF",
-        margin=dict(l=60, r=40, t=60, b=50),
-        height=600
+        title=dict(text=f"Denah Trase Tikungan - {r['jenis']}", font=dict(color='#111111', size=17), x=0.5, xanchor='center'),
+        xaxis=dict(title="x (m)", gridcolor='#E0E0E0', showline=True, linecolor='#333333', mirror=True),
+        yaxis=dict(title="y (m)", gridcolor='#E0E0E0', showline=True, linecolor='#333333', mirror=True, scaleanchor="x", scaleratio=1),
+        legend=dict(bgcolor="rgba(255, 255, 255, 0.96)", bordercolor="#9E9E9E", borderwidth=1),
+        plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF", height=600
     )
     st.plotly_chart(fig_2d, use_container_width=True)
 
 # ----------------------------------------------------------------------------
-# TAB 2: DIAGRAM SUPERELEVASI (DETAIL ROTASI PADA SUMBU JALAN)
+# TAB 2: DIAGRAM SUPERELEVASI
 # ----------------------------------------------------------------------------
 with tab2:
     st.markdown("<h3 style='color: #3A0056;'>📈 Diagram Superelevasi (Rotasi pada Sumbu Jalan)</h3>", unsafe_allow_html=True)
@@ -1044,7 +704,6 @@ with tab2:
         s_full_start = (1.0 / 3.0) * ls_val
         s_full_end = ltot_val - (1.0 / 3.0) * ls_val
         s_end_trans = ltot_val + (2.0 / 3.0) * ls_val
-        
         krit_s = [s_start_trans, 0.0, s_full_start, s_full_end, ltot_val, s_end_trans]
         krit_lbl = ["Awal Transisi", "TC", "e penuh", "e penuh", "CT", "Akhir Transisi"]
     else:
@@ -1052,181 +711,62 @@ with tab2:
         s_full_start = ls_val
         s_full_end = ltot_val - ls_val
         s_end_trans = ltot_val
-        
-        if r["jenis"].startswith("Spiral-Spiral"):
-            krit_s = [0.0, ls_val, ltot_val]
-            krit_lbl = ["TS", "SC=CS", "ST"]
-        else:
-            krit_s = [0.0, ls_val, ltot_val - ls_val, ltot_val]
-            krit_lbl = ["TS", "SC", "CS", "ST"]
+        krit_s = [0.0, ls_val, ltot_val - ls_val, ltot_val]
+        krit_lbl = ["TS", "SC", "CS", "ST"]
 
     trans_len = s_full_start - s_start_trans
     s_zero_1 = s_start_trans + trans_len * (en_val / (e_desain + en_val))
     s_zero_2 = s_end_trans - trans_len * (en_val / (e_desain + en_val))
     
-    s_crown_1 = s_start_trans + trans_len * ((2 * en_val) / (e_desain + en_val))
-    s_crown_2 = s_end_trans - trans_len * ((2 * en_val) / (e_desain + en_val))
-
     margin_s = max(40.0, 0.25 * ltot_val)
     s_min_sup = min(0.0, s_start_trans) - margin_s
     s_max_sup = max(ltot_val, s_end_trans) + margin_s
     
-    key_nodes = np.unique(np.sort([
-        s_min_sup, s_start_trans, s_zero_1, s_crown_1,
-        s_full_start, s_full_end, s_crown_2, s_zero_2, s_end_trans, s_max_sup
-    ]))
-    
-    e_luar = np.zeros_like(key_nodes)
-    e_dalam = np.zeros_like(key_nodes)
+    key_nodes = np.unique(np.sort([s_min_sup, s_start_trans, s_zero_1, s_full_start, s_full_end, s_zero_2, s_end_trans, s_max_sup]))
+    e_luar, e_dalam = np.zeros_like(key_nodes), np.zeros_like(key_nodes)
     
     for i, sv in enumerate(key_nodes):
         if sv <= s_start_trans or sv >= s_end_trans:
-            e_luar[i] = -en_val
-            e_dalam[i] = -en_val
+            e_luar[i], e_dalam[i] = -en_val, -en_val
         elif s_start_trans < sv < s_full_start:
             frac = (sv - s_start_trans) / trans_len
             e_luar[i] = -en_val + frac * (e_desain + en_val)
             e_dalam[i] = min(-en_val, -e_luar[i])
         elif s_full_start <= sv <= s_full_end:
-            e_luar[i] = e_desain
-            e_dalam[i] = -e_desain
+            e_luar[i], e_dalam[i] = e_desain, -e_desain
         elif s_full_end < sv < s_end_trans:
             frac = (s_end_trans - sv) / trans_len
             e_luar[i] = -en_val + frac * (e_desain + en_val)
             e_dalam[i] = min(-en_val, -e_luar[i])
             
     sta_nodes = sta_0 + key_nodes
-    
     fig_sup = go.Figure()
-    
-    fig_sup.add_trace(go.Scatter(
-        x=sta_nodes, y=e_luar,
-        mode='lines',
-        name='Tepi perkerasan luar',
-        line=dict(color='#C62828', width=3),
-        fill='tozeroy',
-        fillcolor='rgba(198, 40, 40, 0.08)'
-    ))
-    
-    fig_sup.add_trace(go.Scatter(
-        x=sta_nodes, y=e_dalam,
-        mode='lines',
-        name='Tepi perkerasan dalam',
-        line=dict(color='#0D47A1', width=3),
-        fill='tozeroy',
-        fillcolor='rgba(13, 71, 161, 0.05)'
-    ))
-    
+    fig_sup.add_trace(go.Scatter(x=sta_nodes, y=e_luar, mode='lines', name='Tepi luar', line=dict(color='#C62828', width=3)))
+    fig_sup.add_trace(go.Scatter(x=sta_nodes, y=e_dalam, mode='lines', name='Tepi dalam', line=dict(color='#0D47A1', width=3)))
     fig_sup.add_hline(y=0, line_width=1.2, line_color="#424242")
-    
-    fig_sup.add_trace(go.Scatter(
-        x=[sta_0 + s_zero_1, sta_0 + s_zero_2],
-        y=[0.0, 0.0],
-        mode='markers',
-        name='Kemiringan Datar (0%)',
-        marker=dict(size=8, color='#111111', symbol='circle')
-    ))
-    
-    y_top_limit = max(e_desain + 3.5, 13.0)
-    y_bot_limit = min(-e_desain - 3.5, -13.0)
     
     for ks, klbl in zip(krit_s, krit_lbl):
         sta_k = sta_0 + ks
         fig_sup.add_vline(x=sta_k, line_width=1, line_dash="dot", line_color="#757575")
         fig_sup.add_annotation(
-            x=sta_k, y=y_top_limit - 1.2,
-            text=f"<b>{klbl}</b><br>{sta_str(sta_k)}",
-            showarrow=False,
-            font=dict(color="#111111", size=11),
-            bgcolor="rgba(255,255,255,0.92)",
-            bordercolor="#E0E0E0", borderwidth=1, borderpad=3
+            x=sta_k, y=e_desain + 2.5, text=f"<b>{klbl}</b><br>{sta_str(sta_k)}",
+            showarrow=False, font=dict(color="#111111", size=11),
+            bgcolor="rgba(255,255,255,0.92)", bordercolor="#E0E0E0", borderwidth=1, borderpad=3
         )
-        
-    mid_full_sta = sta_0 + (s_full_start + s_full_end) / 2
-    fig_sup.add_annotation(
-        x=mid_full_sta, y=e_desain + 0.9,
-        text=f"<b>+e = {e_desain:.2f}%</b>",
-        showarrow=False,
-        font=dict(color="#B71C1C", size=12),
-        bgcolor="rgba(255,255,255,0.92)", borderpad=2
-    )
-    fig_sup.add_annotation(
-        x=mid_full_sta, y=-e_desain - 1.1,
-        text=f"<b>-e = -{e_desain:.2f}%</b>",
-        showarrow=False,
-        font=dict(color="#0D47A1", size=12),
-        bgcolor="rgba(255,255,255,0.92)", borderpad=2
-    )
-    fig_sup.add_annotation(
-        x=sta_nodes[0] + margin_s * 0.45, y=-en_val - 1.1,
-        text=f"<b>en = -{en_val:.1f}%</b>",
-        showarrow=False,
-        font=dict(color="#222222", size=11),
-        bgcolor="rgba(255,255,255,0.92)", borderpad=2
-    )
-    
-    tick_step = 50.0
-    x_tick_vals = np.arange(
-        math.ceil(sta_nodes[0] / tick_step) * tick_step,
-        math.floor(sta_nodes[-1] / tick_step) * tick_step + 1,
-        tick_step
-    )
-    x_tick_texts = [sta_str(v, d=0) for v in x_tick_vals]
 
     fig_sup.update_layout(
-        title=dict(
-            text="Diagram Superelevasi (rotasi pada sumbu jalan)",
-            font=dict(color='#111111', size=17),
-            x=0.5, xanchor='center'
-        ),
-        xaxis=dict(
-            title="Stasioning",
-            title_font=dict(color='#111111', size=13),
-            tickfont=dict(color='#222222'),
-            tickmode='array',
-            tickvals=x_tick_vals,
-            ticktext=x_tick_texts,
-            gridcolor='#E0E0E0',
-            showline=True, linecolor='#333333', mirror=True
-        ),
-        yaxis=dict(
-            title="Kemiringan melintang (%)",
-            title_font=dict(color='#111111', size=13),
-            tickfont=dict(color='#222222'),
-            range=[y_bot_limit, y_top_limit],
-            gridcolor='#E0E0E0',
-            showline=True, linecolor='#333333', mirror=True
-        ),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom", y=0.02,
-            xanchor="center", x=0.5,
-            bgcolor="rgba(255, 255, 255, 0.96)",
-            bordercolor="#9E9E9E", borderwidth=1,
-            font=dict(color="#111111", size=12)
-        ),
-        plot_bgcolor="#FFFFFF",
-        paper_bgcolor="#FFFFFF",
-        margin=dict(l=60, r=40, t=60, b=50),
-        height=550
+        title=dict(text="Diagram Superelevasi", font=dict(color='#111111', size=17), x=0.5, xanchor='center'),
+        xaxis=dict(title="Stasioning", gridcolor='#E0E0E0', showline=True, linecolor='#333333', mirror=True),
+        yaxis=dict(title="Kemiringan (%)", gridcolor='#E0E0E0', showline=True, linecolor='#333333', mirror=True),
+        plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF", height=550
     )
     st.plotly_chart(fig_sup, use_container_width=True)
 
 # ----------------------------------------------------------------------------
-# TAB 3: PROFIL MEMANJANG & SIMULASI 3D (SMOOTH PLOTLY ANIMATION)
+# TAB 3: SIMULASI 3D MOBIL JALAN
 # ----------------------------------------------------------------------------
 with tab3:
     st.markdown("<h3 style='color: #3A0056;'>🚘 Visualisasi 3D Jalan & Simulator Mobil Jalan Otomatis</h3>", unsafe_allow_html=True)
-    
-    col_e1, col_e2 = st.columns(2)
-    with col_e1:
-        st.markdown("<b style='color:#3A0056;'>Edit Data PVI Alinyemen Vertikal:</b>", unsafe_allow_html=True)
-        st.session_state.pvi_df = st.data_editor(st.session_state.pvi_df, num_rows="dynamic", key="pvi_ed", hide_index=True)
-    with col_e2:
-        st.markdown("<b style='color:#3A0056;'>Edit Data Elevasi Tanah Asli:</b>", unsafe_allow_html=True)
-        st.session_state.tanah_df = st.data_editor(st.session_state.tanah_df, num_rows="dynamic", key="tnh_ed", hide_index=True)
-        
-    st.markdown("---")
     
     v_safe = r["v_safe"]
     if v_sim <= v_safe:
@@ -1241,197 +781,150 @@ with tab3:
         car_color = "#E65100"
         status_box = f"""
         <div class="status-card status-sedang">
-            🟡 <b>KONDISI KUNING (SEDANG / WASPADA):</b> Mobil Mendekati Batas Aman!<br>
-            Kecepatan simulasi ({v_sim} km/jam) sedikit melampaui V_aman ({v_safe:.1f} km/jam). Harap kurangi kecepatan.
+            🟡 <b>KONDISI KUNING (WASPADA):</b> Mobil Mendekati Batas Aman!<br>
+            Kecepatan simulasi ({v_sim} km/jam) sedikit melampaui V_aman ({v_safe:.1f} km/jam).
         </div>
         """
     else:
         car_color = "#B71C1C"
         status_box = f"""
         <div class="status-card status-bahaya">
-            🔴 <b>KONDISI MERAH (TIDAK OKE / BAHAYA):</b> Over-Speed!<br>
-            Kecepatan simulasi ({v_sim} km/jam) melampaui batas aman ({v_safe:.1f} km/jam). Berisiko selip atau kecelakaan.
+            🔴 <b>KONDISI MERAH (BAHAYA):</b> Over-Speed!<br>
+            Kecepatan simulasi ({v_sim} km/jam) melampaui batas aman ({v_safe:.1f} km/jam). Berisiko selip.
         </div>
         """
-        
     st.markdown(status_box, unsafe_allow_html=True)
 
-    # Buat sampling titik untuk frame animasi agar mulus & ringan (sekitar 60 frame)
     step_frame = max(1, len(s_vals) // 60)
     frame_indices = list(range(0, len(s_vals), step_frame))
     if frame_indices[-1] != len(s_vals) - 1:
         frame_indices.append(len(s_vals) - 1)
-
-    # Durasi per frame disesuaikan dengan kecepatan kendaraan (v_sim)
     frame_duration = max(30, int(4000 / max(v_sim, 10)))
 
-    # Susun Frames Animasi Mobil
-    frames = []
-    slider_steps = []
+    frames, slider_steps = [], []
     for idx in frame_indices:
         sta_lbl = f"STA {sta_str(r['sta_awal'] + s_vals[idx])}"
         frames.append(go.Frame(
             data=[go.Scatter3d(
-                x=[x_horiz[idx]],
-                y=[y_horiz[idx]],
-                z=[z_elev[idx] + 1.2],
-                mode='markers+text',
-                marker=dict(size=12, color=car_color, symbol='diamond'),
-                text=[f"🚘 {sta_lbl}"],
-                textposition="top center",
-                textfont=dict(color="#111111", size=12)
+                x=[x_horiz[idx]], y=[y_horiz[idx]], z=[z_elev[idx] + 1.2],
+                mode='markers+text', marker=dict(size=12, color=car_color, symbol='diamond'),
+                text=[f"🚘 {sta_lbl}"], textposition="top center", textfont=dict(color="#111111", size=12)
             )],
-            traces=[0],
-            name=str(idx)
+            traces=[0], name=str(idx)
         ))
         slider_steps.append({
             "args": [[str(idx)], {"frame": {"duration": 0, "redraw": True}, "mode": "immediate"}],
-            "label": f"{s_vals[idx]:.0f}m",
-            "method": "animate"
+            "label": f"{s_vals[idx]:.0f}m", "method": "animate"
         })
 
     fig_3d = go.Figure(
         data=[
-            # Trace 0: Mobil Simulasi (yang bergerak antar frame)
-            go.Scatter3d(
-                x=[x_horiz[0]], y=[y_horiz[0]], z=[z_elev[0] + 1.2],
-                mode='markers+text', name='Mobil Simulasi',
-                marker=dict(size=12, color=car_color, symbol='diamond'),
-                text=[f"🚘 STA {sta_str(r['sta_awal'] + s_vals[0])}"],
-                textposition="top center",
-                textfont=dict(color="#111111", size=12)
-            ),
-            # Trace 1: As Jalan 3D
-            go.Scatter3d(
-                x=x_horiz, y=y_horiz, z=z_elev, mode='lines', name='As Jalan 3D',
-                line=dict(color='#3A0056', width=6)
-            ),
-            # Trace 2 & 3: Tepi Kiri & Kanan 3D
-            go.Scatter3d(
-                x=xl, y=yl, z=z_elev, mode='lines', name='Tepi Kiri 3D',
-                line=dict(color='#C2185B', width=3)
-            ),
-            go.Scatter3d(
-                x=xr, y=yr, z=z_elev, mode='lines', name='Tepi Kanan 3D',
-                line=dict(color='#C2185B', width=3)
-            ),
+            go.Scatter3d(x=[x_horiz[0]], y=[y_horiz[0]], z=[z_elev[0] + 1.2], mode='markers+text', marker=dict(size=12, color=car_color, symbol='diamond'), text=[f"🚘 STA {sta_str(r['sta_awal'] + s_vals[0])}"]),
+            go.Scatter3d(x=x_horiz, y=y_horiz, z=z_elev, mode='lines', name='As Jalan', line=dict(color='#3A0056', width=6)),
+            go.Scatter3d(x=xl, y=yl, z=z_elev, mode='lines', name='Tepi Kiri', line=dict(color='#C2185B', width=3)),
+            go.Scatter3d(x=xr, y=yr, z=z_elev, mode='lines', name='Tepi Kanan', line=dict(color='#C2185B', width=3)),
         ],
         frames=frames
     )
-
     fig_3d.update_layout(
-        title=dict(
-            text="Visualisasi 3D Trase Jalan & Simulator Mobil (Klik ▶️ Jalan di Kiri Bawah Grafik)",
-            font=dict(color='#111111', size=16)
-        ),
+        title=dict(text="Visualisasi 3D Trase Jalan & Simulator Mobil", font=dict(color='#111111', size=16)),
         template="plotly_white",
-        scene=dict(
-            xaxis_title="X (m)", yaxis_title="Y (m)", zaxis_title="Elevasi Z (m)",
-            aspectmode='data'
-        ),
-        legend=dict(
-            bgcolor="rgba(255,255,255,0.95)",
-            bordercolor="#9E9E9E", borderwidth=1,
-            font=dict(color="#111111")
-        ),
+        scene=dict(xaxis_title="X (m)", yaxis_title="Y (m)", zaxis_title="Z (m)", aspectmode='data'),
         updatemenus=[{
-            "type": "buttons",
-            "showactive": True,
-            "x": 0.02, "y": 0.02,
-            "xanchor": "left", "yanchor": "bottom",
-            "bgcolor": "#FCE4EC",
-            "bordercolor": "#AD1457",
-            "font": {"color": "#880E4F", "size": 13},
-            "buttons": [
-                {
-                    "label": "▶️ Jalan",
-                    "method": "animate",
-                    "args": [None, {
-                        "frame": {"duration": frame_duration, "redraw": True},
-                        "fromcurrent": True,
-                        "transition": {"duration": 0}
-                    }]
-                },
-                {
-                    "label": "⏸️ Pause",
-                    "method": "animate",
-                    "args": [[None], {
-                        "frame": {"duration": 0, "redraw": False},
-                        "mode": "immediate",
-                        "transition": {"duration": 0}
-                    }]
-                }
-            ]
+            "type": "buttons", "showactive": True, "x": 0.02, "y": 0.02,
+            "buttons": [{
+                "label": "▶️ Jalan", "method": "animate",
+                "args": [None, {"frame": {"duration": frame_duration, "redraw": True}, "fromcurrent": True}]
+            }, {
+                "label": "⏸️ Pause", "method": "animate",
+                "args": [[None], {"frame": {"duration": 0, "redraw": False}, "mode": "immediate"}]
+            }]
         }],
-        sliders=[{
-            "active": 0,
-            "yanchor": "top", "xanchor": "left",
-            "currentvalue": {
-                "font": {"size": 13, "color": "#3A0056"},
-                "prefix": "Posisi Relatif: ",
-                "visible": True,
-                "xanchor": "right"
-            },
-            "pad": {"b": 10, "t": 40},
-            "len": 0.82, "x": 0.16, "y": 0.02,
-            "steps": slider_steps
-        }],
-        margin=dict(l=0, r=0, b=40, t=50),
-        height=620,
-        paper_bgcolor="#FFFFFF",
-        font=dict(color="#111111")
+        sliders=[{"active": 0, "steps": slider_steps, "len": 0.82, "x": 0.16, "y": 0.02}],
+        height=620, paper_bgcolor="#FFFFFF"
     )
-
     st.plotly_chart(fig_3d, use_container_width=True)
 
 # ----------------------------------------------------------------------------
-# TAB 4: PROFIL MEMANJANG & EKSPOR CAD
+# TAB 4: GAMBAR AUTOCAD & PARAMETER (PENGGANTI PROFIL MEMANJANG)
 # ----------------------------------------------------------------------------
 with tab4:
-    st.markdown("<h3 style='color: #3A0056;'>📊 Profil Memanjang Vertikal Jalan & Ekspor CAD (.DXF)</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 style='color: #3A0056;'>📐 Sketsa Teknik & Parameter Geometri Tikungan (Format CAD)</h3>", unsafe_allow_html=True)
+    st.markdown("Berikut adalah diagram skematis simetris tikungan lengkap dengan nilai parameter hitungan nyata ($R_{min}$, $R_c$, $T_s$, $E_s$, dll.) sesuai standar Bina Marga.")
+
+    # Membuat plot sketsa teknik layaknya gambar AutoCAD (Simetris & Berdimensi)
+    fig_cad = go.Figure()
+
+    # Koordinat skematis simetris untuk ilustrasi CAD
+    # Tangen masuk dan keluar
+    fig_cad.add_trace(go.Scatter(x=[-250, -50], y=[0, 0], mode='lines', name='Tangen Masuk', line=dict(color='#1565C0', width=2, dash='dash')))
+    fig_cad.add_trace(go.Scatter(x=[50, 250], y=[0, 0], mode='lines', name='Tangen Keluar', line=dict(color='#1565C0', width=2, dash='dash')))
     
-    if P_global is not None:
-        t_df = st.session_state.tanah_df.dropna().sort_values(st.session_state.tanah_df.columns[0])
-        fig_prof = go.Figure()
-        
-        fig_prof.add_trace(go.Scatter(
-            x=t_df.iloc[:, 0], y=t_df.iloc[:, 1], mode='lines+markers',
-            name='Elevasi Tanah Asli', line=dict(color='#1B5E20', dash='dash')
-        ))
-        fig_prof.add_trace(go.Scatter(
-            x=s_vals, y=z_elev, mode='lines', name='Elevasi Rencana Jalan',
-            line=dict(color='#C2185B', width=3)
-        ))
-        
-        pvi_x = P_global["sta"]
-        pvi_y = P_global["el"]
-        fig_prof.add_trace(go.Scatter(
-            x=pvi_x, y=pvi_y, mode='markers+text', name='Titik PVI',
-            marker=dict(size=8, color='#3A0056', symbol='x'),
-            text=[f"PVI-{i+1}" for i in range(len(pvi_x))], textposition="top center",
-            textfont=dict(color="#111111")
-        ))
+    # Titik PI
+    fig_cad.add_trace(go.Scatter(x=[0], y=[120], mode='markers+text', name='Titik PI', marker=dict(size=12, color='#111111', symbol='square'), text=["<b>PI</b>"], textposition="top center"))
+    fig_cad.add_trace(go.Scatter(x=[-50, 0, 50], y=[0, 120, 0], mode='lines', name='Garis Singgung PI', line=dict(color='#9E9E9E', width=1, dash='dot'), showlegend=False))
 
-        fig_prof.update_layout(
-            title=dict(text="Grafik Profil Memanjang Vertikal (Tanah Asli vs Rencana)", font=dict(color='#111111', size=16)),
-            xaxis=dict(title="Stasioning STA (m)", title_font=dict(color='#111111'), tickfont=dict(color='#222222'), gridcolor='#E0E0E0'),
-            yaxis=dict(title="Elevasi Z (m)", title_font=dict(color='#111111'), tickfont=dict(color='#222222'), gridcolor='#E0E0E0'),
-            legend=dict(bgcolor="rgba(255,255,255,0.95)", bordercolor="#9E9E9E", borderwidth=1, font=dict(color="#111111")),
-            template="plotly_white", showlegend=True,
-            plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
-            font=dict(color="#111111")
-        )
-        st.plotly_chart(fig_prof, use_container_width=True)
+    # Kurva Spiral - Circle - Spiral (Simetris)
+    x_arc = np.linspace(-50, 50, 100)
+    y_arc = 35 * (1 - np.cos(x_arc * np.pi / 100))
+    fig_cad.add_trace(go.Scatter(x=x_arc, y=y_arc, mode='lines', name='Busur Tikungan (Rc)', line=dict(color='#C2185B', width=3.5)))
 
-    dxf_out = export_dxf_full_autocad(x_horiz, y_horiz, z_elev, s_vals, r, B, nx, ny)
-    st.download_button(
-        "📐 Unduh Gambar AutoCAD / Civil 3D (.DXF Multi-Layer)",
-        dxf_out, file_name="Geometri_Jalan_BinaMarga.dxf", mime="application/dxf",
-        use_container_width=True
+    # Titik Penting (TS, SC, CS, ST atau TC, CT)
+    pts_cad_x = [-120, -50, 50, 120]
+    pts_cad_y = [0, 15, 15, 0]
+    is_fc = r["jenis"].startswith("Full")
+    lbl_pts = ["TC", "CT", "", ""] if is_fc else ["TS", "SC", "CS", "ST"]
+
+    fig_cad.add_trace(go.Scatter(
+        x=pts_cad_x[:2] + pts_cad_x[2:], y=pts_cad_y[:2] + pts_cad_y[2:],
+        mode='markers+text', name='Titik Penting',
+        marker=dict(size=10, color='#D50000', symbol='circle'),
+        text=lbl_pts, textposition="bottom center",
+        textfont=dict(color="#880E4F", size=12, family="monospace")
+    ))
+
+    # Anotasi Teks Keterangan Parameter Persis Seperti Permintaan (Rmin, Rc, Ts, Es, Ls, dll.)
+    annotations_cad = [
+        dict(x=-180, y=35, text=f"<b>Rmin = {r['Rmin']:.2f} m</b><br>(Acuan TPGJAK)", showarrow=False, bgcolor="#FFF9C4", bordercolor="#FBC02D", borderwidth=1, borderpad=4),
+        dict(x=180, y=35, text=f"<b>Rc = {r['Rc']:.2f} m</b><br>(Jari-Jari Rencana)", showarrow=False, bgcolor="#C8E6C9", bordercolor="#43A047", borderwidth=1, borderpad=4),
+        dict(x=0, y=75, text=f"<b>Es = {r['E']:.3f} m</b><br>(Jarak Eksternal)", showarrow=False, bgcolor="#E1F5FE", bordercolor="#03A9F4", borderwidth=1, borderpad=4),
+        dict(x=-140, y=-15, text=f"<b>Ts = {r['T']:.3f} m</b><br>(Panjang Tangen)", showarrow=False, bgcolor="#FCE4EC", bordercolor="#E91E63", borderwidth=1, borderpad=4),
+        dict(x=0, y=42, text=f"<b>Lc = {r['Lc']:.2f} m</b><br><b>Ls = {r['Ls']:.2f} m</b>", showarrow=False, bgcolor="#F3E5F5", bordercolor="#AB47BC", borderwidth=1, borderpad=4),
+        dict(x=0, y=135, text=f"<b>Sudut Δ = {r['delta']:.2f}°</b>", showarrow=False, font=dict(size=13, color="#3A0056")),
+    ]
+
+    fig_cad.update_layout(
+        title=dict(text=f"Layout Sketsa Teknik CAD — {r['jenis']} (Simetris)", font=dict(color='#3A0056', size=18, family="Arial"), x=0.5, xanchor='center'),
+        xaxis=dict(title="Sumbu X (m)", showgrid=True, zeroline=True, gridcolor='#E0E0E0'),
+        yaxis=dict(title="Sumbu Y (m)", showgrid=True, zeroline=True, gridcolor='#E0E0E0', scaleanchor="x", scaleratio=1),
+        annotations=annotations_cad,
+        plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
+        height=580,
+        legend=dict(bgcolor="rgba(255,255,255,0.9)", bordercolor="#BDBDBD", borderwidth=1)
     )
+    st.plotly_chart(fig_cad, use_container_width=True)
+
+    st.markdown("---")
+    st.markdown("### 📥 Unduh Berkas CAD (.DXF) & Laporan")
+    dxf_out = export_dxf_full_autocad(x_horiz, y_horiz, z_elev, s_vals, r, B, nx, ny)
+    col_dl1, col_dl2 = st.columns(2)
+    with col_dl1:
+        st.download_button(
+            "📐 Unduh Gambar AutoCAD / Civil 3D (.DXF Multi-Layer)",
+            dxf_out, file_name="Geometri_Jalan_BinaMarga.dxf", mime="application/dxf",
+            use_container_width=True
+        )
+    with col_dl2:
+        excel_bytes = generate_excel_bm2021(r, P_global)
+        st.download_button(
+            "📊 Unduh Laporan Excel Ber-Formula Otomatis (.XLSX)",
+            excel_bytes, file_name="Perhitungan_Geometri_Jalan_BM2021.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
 
 # ----------------------------------------------------------------------------
-# TAB 5: TABEL HITUNGAN & EXCEL REPORT (BM 2021)
+# TAB 5: TABEL HITUNGAN & EXCEL REPORT
 # ----------------------------------------------------------------------------
 with tab5:
     st.markdown("<h3 style='color: #3A0056;'>📋 Tabel Hasil Perhitungan Tikungan & Laporan Excel</h3>", unsafe_allow_html=True)
@@ -1464,4 +957,3 @@ with tab5:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
-    

@@ -375,73 +375,397 @@ else:
     z_elev = np.zeros_like(s_vals)
 
 # ----------------------------------------------------------------------------
-# 4. EXPORT ENGINE (CAD DXF & EXCEL BM 2021)
+# 4. EXPORT ENGINE (CAD DXF & EXCEL BM 2021 - FORMAT LEMBAR HITUNGAN BERTAHAP)
 # ----------------------------------------------------------------------------
 def generate_excel_bm2021(r, pvi_data):
     wb = openpyxl.Workbook()
-    font_title = Font(name="Calibri", size=14, bold=True, color="3A0056")
-    font_header = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-    fill_header = PatternFill(start_color="C2185B", end_color="C2185B", fill_type="solid")
-    fill_input = PatternFill(start_color="FCE4EC", end_color="FCE4EC", fill_type="solid")
-    border_thin = Border(left=Side(style='thin', color='F8BBD0'), right=Side(style='thin', color='F8BBD0'),
-                         top=Side(style='thin', color='F8BBD0'), bottom=Side(style='thin', color='F8BBD0'))
+    
+    # Styling lembar hitungan teknis (Times New Roman rapi)
+    font_title = Font(name="Times New Roman", size=12, bold=True, color="000000")
+    font_sec = Font(name="Times New Roman", size=11, bold=True, color="000000")
+    font_reg = Font(name="Times New Roman", size=11, bold=False, color="000000")
+    font_italic = Font(name="Times New Roman", size=11, italic=True, color="000000")
+    font_bold = Font(name="Times New Roman", size=11, bold=True, color="000000")
 
+    fill_cream = PatternFill(start_color="FDEBD0", end_color="FDEBD0", fill_type="solid")
+    fill_yellow = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+    fill_grey = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+
+    thin = Side(style="thin", color="000000")
+    med = Side(style="medium", color="000000")
+    border_cell = Border(left=thin, right=thin, top=thin, bottom=thin)
+    border_box = Border(left=med, right=med, top=med, bottom=med)
+
+    align_c = openpyxl.styles.Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    def apply_border_range(ws, cell_range, border):
+        for row in ws[cell_range]:
+            for cell in row:
+                cell.border = border
+
+    # =========================================================================
+    # SHEET 1: PERHITUNGAN TIKUNGAN HORIZONTAL
+    # =========================================================================
     ws1 = wb.active
     ws1.title = "Tikungan Horisontal"
-    ws1["A1"] = "REKAPITULASI KALKULASI GEOMETRIK JALAN (BINA MARGA 2021)"
+
+    col_widths = {"A": 6, "B": 12, "C": 12, "D": 11, "E": 11, "F": 11, "G": 5, "H": 12, "I": 12}
+    for col_l, w in col_widths.items():
+        ws1.column_dimensions[col_l].width = w
+
+    # Header Judul
+    ws1.merge_cells("A1:I1")
+    ws1["A1"] = f"PERHITUNGAN TIKUNGAN 1 ({r['jenis'].upper()})"
     ws1["A1"].font = font_title
+    ws1["A1"].fill = fill_cream
+    ws1["A1"].alignment = align_c
+    ws1.row_dimensions[1].height = 26
+    apply_border_range(ws1, "A1:I1", border_box)
 
-    headers = ["Parameter Geometrik", "Nilai", "Satuan", "Formula / Acuan BM 2021"]
-    for col_i, h in enumerate(headers, start=1):
-        cell = ws1.cell(row=3, column=col_i, value=h)
-        cell.font = font_header
-        cell.fill = fill_header
-
-    fc = r["jenis"].startswith("Full")
-    t_start = "TC" if fc else "TS"
-    t_end = "CT" if fc else "ST"
-
-    params = [
-        ("Jenis Tikungan", r["jenis"], "-", "Kriteria R_fc (BM 2021)"),
-        ("Kecepatan Rencana (Vr)", r["V"], "km/jam", "Input Desain"),
-        ("Sudut Tikungan (Delta)", r["delta"], "°", "Input Desain"),
-        ("Jari-Jari Tikungan (Rc)", r["Rc"], "m", "Input Desain"),
-        ("Superelevasi Maksimum (e_max)", r["emax"] * 100, "%", "Standar Fisiologis"),
-        ("Superelevasi Desain (e)", round(r["e"] * 100, 2), "%", "=-e_max*D^2/Dmax^2 + 2*e_max*D/Dmax"),
-        ("Panjang Transisi (Ls)", r["Ls_sup"], "m", "=MAX(Ls_waktu, Ls_shortt, Ls_re)"),
-        ("Panjang Tangen (T)", round(r["T"], 3), "m", "=(Rc+p)*TAN(RAD(Delta/2))+k"),
-        ("Jarak Eksternal (E)", round(r["E"], 3), "m", "=(Rc+p)/COS(RAD(Delta/2))-Rc"),
-        ("Panjang Total Tikungan (Ltot)", round(r["Ltot"], 3), "m", "=Lc + 2*Ls"),
-        ("Kecepatan Aman Maksimum (V_safe)", round(r["v_safe"], 2), "km/jam", "=SQRT(127*Rc*(e + f_max))"),
-        ("STA PI", sta_str(r["sta_pi"]), "m", "Input Desain"),
-        (f"STA {t_start} (Awal Tikungan)", sta_str(r["sta_awal"]), "m", "=STA_PI - Tangen(T)"),
-        (f"STA {t_end} (Akhir Tikungan)", sta_str(r["sta_akhir"]), "m", f"=STA_{t_start} + Ltot")
+    # Tabel Data Input Awal (Baris 2 - 9)
+    inputs_h = [
+        (2, "Kecepatan Rencana (Vr)", r["V"], '0.0" km/jam"', fill_yellow, "=D2/3.6", '0.0000" m/s"'),
+        (3, "Superelevasi maksimum (e_max)", r["emax"], "0.0%", fill_yellow, "=D3", "0.000"),
+        (4, "Δ (sudut tikungan)", r["delta"], '0.00"°"', None, "=RADIANS(D4)", '0.0000" rad"'),
+        (5, "T (waktu tempuh asumsi)", 3.0, '0.0" s"', fill_yellow, "=D5", '0.0" s"'),
+        (6, "B (lebar perkerasan)", B, '0.0" m"', fill_yellow, "=D6", '0.0" m"'),
+        (7, "en (kemiringan normal)", r["en"], "0.0%", fill_grey, "=D7", "0.000"),
+        (8, "C (perubahan percepatan sentrifugal)", 0.4, '0.0" m/s³"', fill_grey, "=D8", '0.0" m/s³"'),
+        (9, "re (tingkat pencapaian kelandaian)", 0.035 if r["V"] <= 70 else 0.025, "0.0%", None, "=D9", "0.000"),
     ]
 
-    for row_i, (p, v, u, f) in enumerate(params, start=4):
-        ws1.cell(row=row_i, column=1, value=p).border = border_thin
-        c_v = ws1.cell(row=row_i, column=2, value=v)
-        c_v.border = border_thin
-        c_v.fill = fill_input
-        ws1.cell(row=row_i, column=3, value=u).border = border_thin
-        ws1.cell(row=row_i, column=4, value=f).border = border_thin
+    for row_idx, label, val_in, fmt_in, fill_in, formula_h, fmt_h in inputs_h:
+        ws1.row_dimensions[row_idx].height = 22
+        ws1.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=3)
+        ws1.merge_cells(start_row=row_idx, start_column=4, end_row=row_idx, end_column=6)
+        ws1.merge_cells(start_row=row_idx, start_column=8, end_row=row_idx, end_column=9)
 
-    if pvi_data is not None:
-        ws2 = wb.create_sheet(title="Alinyemen Vertikal")
-        ws2["A1"] = "REKAPITULASI ALINYEMEN VERTIKAL"
-        ws2["A1"].font = font_title
-        
-        v_headers = ["PVI", "STA (m)", "Elevasi PVI (m)", "Kelandaian g1 (%)", "Kelandaian g2 (%)", "Beda Kelandaian A (%)", "Panjang Kurva Lv (m)", "Jenis Lengkung"]
-        for col_i, h in enumerate(v_headers, start=1):
-            cell = ws2.cell(row=3, column=col_i, value=h)
-            cell.font = font_header
-            cell.fill = fill_header
+        c_lbl = ws1.cell(row=row_idx, column=1, value=label)
+        c_lbl.font = font_reg
+        c_lbl.alignment = align_c
 
-        for idx, k in enumerate(pvi_data["kurva"], start=1):
-            row_vals = [f"PVI-{idx}", k["sta"], k["el"], round(k["g1"]*100, 2), round(k["g2"]*100, 2), round(k["A"], 2), k["Lv"], k["jenis"]]
-            for col_i, val in enumerate(row_vals, start=1):
-                c = ws2.cell(row=idx+3, column=col_i, value=val)
-                c.border = border_thin
+        c_val = ws1.cell(row=row_idx, column=4, value=val_in)
+        c_val.font = font_reg
+        c_val.alignment = align_c
+        c_val.number_format = fmt_in
+        if fill_in:
+            for c_i in range(4, 7):
+                ws1.cell(row=row_idx, column=c_i).fill = fill_in
+
+        c_eq = ws1.cell(row=row_idx, column=7, value="=")
+        c_eq.font = font_bold
+        c_eq.alignment = align_c
+
+        c_res = ws1.cell(row=row_idx, column=8, value=formula_h)
+        c_res.font = font_reg
+        c_res.alignment = align_c
+        c_res.number_format = fmt_h
+
+        apply_border_range(ws1, f"A{row_idx}:I{row_idx}", border_cell)
+
+    def add_step_block(ws, start_r, step_no, title_txt, rows_spec):
+        """Helper untuk membuat blok langkah bernomor seperti pada gambar referensi."""
+        end_r = start_r + len(rows_spec)
+        ws.merge_cells(start_row=start_r, start_column=1, end_row=end_r, end_column=1)
+        c_no = ws.cell(row=start_r, column=1, value=step_no)
+        c_no.font = font_bold
+        c_no.alignment = align_c
+
+        ws.merge_cells(start_row=start_r, start_column=2, end_row=start_r, end_column=9)
+        c_tit = ws.cell(row=start_r, column=2, value=title_txt)
+        c_tit.font = font_sec
+        c_tit.alignment = align_c
+        ws.row_dimensions[start_r].height = 22
+        for c_i in range(2, 10):
+            ws.cell(row=start_r, column=c_i).fill = fill_cream
+
+        for idx_sub, (sub_hdr, rumus_txt, formula_val, num_fmt, highlight_res) in enumerate(rows_spec):
+            cur_r = start_r + 1 + idx_sub
+            ws.row_dimensions[cur_r].height = 24
+            if sub_hdr:
+                ws.merge_cells(start_row=cur_r, start_column=2, end_row=cur_r, end_column=9)
+                c_sh = ws.cell(row=cur_r, column=2, value=rumus_txt)
+                c_sh.font = font_reg
+                c_sh.alignment = align_c
+            else:
+                ws.merge_cells(start_row=cur_r, start_column=2, end_row=cur_r, end_column=6)
+                c_rm = ws.cell(row=cur_r, column=2, value=rumus_txt)
+                c_rm.font = font_italic
+                c_rm.alignment = align_c
+
+                c_eq = ws.cell(row=cur_r, column=7, value="=")
+                c_eq.font = font_bold
+                c_eq.alignment = align_c
+
+                ws.merge_cells(start_row=cur_r, start_column=8, end_row=cur_r, end_column=9)
+                c_vl = ws.cell(row=cur_r, column=8, value=formula_val)
+                c_vl.font = font_bold if highlight_res else font_reg
+                c_vl.alignment = align_c
+                if num_fmt:
+                    c_vl.number_format = num_fmt
+                if highlight_res:
+                    ws.cell(row=cur_r, column=8).fill = fill_grey
+                    ws.cell(row=cur_r, column=9).fill = fill_grey
+
+        apply_border_range(ws, f"A{start_r}:I{end_r}", border_box)
+        for r_i in range(start_r, end_r + 1):
+            for c_i in range(1, 10):
+                cell = ws.cell(row=r_i, column=c_i)
+                b_top = med if r_i == start_r else thin
+                b_bot = med if r_i == end_r else thin
+                b_left = med if c_i in (1, 2) else (thin if c_i in (7, 8) else None)
+                b_right = med if c_i in (1, 9) else (thin if c_i in (6, 7) else None)
+                cell.border = Border(top=b_top, bottom=b_bot, left=b_left, right=b_right)
+        return end_r + 1
+
+    curr = 10
+    # Step 1: FMAX -> H11
+    curr = add_step_block(ws1, curr, 1, "FMAX (Koefisien Gesek Melintang Maksimum)", [
+        (False, "f_max = -0.00065·Vr + 0.192 (Vr < 80) atau -0.00125·Vr + 0.24", "=IF(D2<80, -0.00065*D2+0.192, -0.00125*D2+0.24)", "0.0000", False)
+    ])
+
+    # Step 2: Rmin -> H13
+    curr = add_step_block(ws1, curr, 2, "MENGHITUNG Rmin", [
+        (False, "Rmin = Vr² / (127 × (e_max + f_max))", "=D2^2/(127*(H3+H11))", '0.0000" m"', False)
+    ])
+
+    # Step 3: R rencana -> H15
+    curr = add_step_block(ws1, curr, 3, "MENENTUKAN JARI-JARI RENCANA (Rc)", [
+        (False, "Rc rencana ≥ Rmin, diambil Rc rencana", r["Rc"], '0.00" m"', True)
+    ])
+
+    # Step 4: Superelevasi desain (e) -> Dmax=H17, D=H18, e=H19
+    curr = add_step_block(ws1, curr, 4, "MENGHITUNG SUPERELEVASI DESAIN (e)", [
+        (False, "Dmax = 181913.53 × (e_max + f_max) / Vr²", "=181913.53*(H3+H11)/(D2^2)", "0.0000", False),
+        (False, "D = 1432.39 / Rc", "=1432.39/H15", "0.0000", False),
+        (False, "e = MAX(en, -e_max·(D/Dmax)² + 2·e_max·(D/Dmax))", "=MAX(H7, -H3*(H18/H17)^2 + 2*H3*(H18/H17))", "0.00%", False),
+    ])
+
+    # Step 5: Ls min -> H22, H24, H26
+    curr = add_step_block(ws1, curr, 5, "MENGHITUNG Ls min (Lengkung Peralihan Minimum)", [
+        (True, "Berdasarkan waktu tempuh maksimum lengkung peralihan (3 detik)", None, None, False),
+        (False, "Ls = (Vr / 3.6) × T", "=(D2/3.6)*D5", "0.0000", False),
+        (True, "Berdasarkan antisipasi gaya sentrifugal (Rumus Shortt)", None, None, False),
+        (False, "Ls = (0.022·Vr³)/(Rc·C) - (2.727·Vr·e)/C", "=(0.022*(D2^3))/(H15*D8)-(2.727*D2*H19)/D8", "0.0000", False),
+        (True, "Berdasarkan tingkat pencapaian perubahan kelandaian", None, None, False),
+        (False, "Ls = ((e + en) × Vr) / (3.6 × re)", "=((H19+H7)*D2)/(3.6*H9)", "0.0000", False),
+    ])
+
+    # Step 6: Ls rencana -> H28
+    curr = add_step_block(ws1, curr, 6, "MENENTUKAN Ls RENCANA (Dibulatkan kelipatan 5 m)", [
+        (False, "Ls rencana ≥ MAX(Ls1, Ls2, Ls3), diambil Ls rencana", "=CEILING(MAX(H22,H24,H26), 5)", '0.00" m"', True)
+    ])
+
+    # Step 7: Theta_s -> H30
+    curr = add_step_block(ws1, curr, 7, "Menghitung θs (deflection angle tiap spiral)", [
+        (False, "θs = (Ls × 90) / (π × Rc)", "=(H28*90)/(PI()*H15)", '0.0000"°"', False)
+    ])
+
+    # Step 8: Theta_c -> H32
+    curr = add_step_block(ws1, curr, 8, "Menghitung θc (sudut lingkaran / central angle busur)", [
+        (False, "θc = Δ - 2·θs", "=IF(H28=0, D4, D4-2*H30)", '0.0000"°"', False)
+    ])
+
+    # Step 9: Lc -> H34
+    curr = add_step_block(ws1, curr, 9, "Menghitung Panjang Busur Lingkaran (Lc)", [
+        (False, "Lc = (θc / 360) × 2π·Rc", "=(H32/360)*2*PI()*H15", '0.0000" m"', False)
+    ])
+
+    # Step 10: Ltotal -> H36
+    curr = add_step_block(ws1, curr, 10, "Menentukan L total", [
+        (False, "Ltotal = Lc + 2·Ls", "=H34+2*H28", '0.0000" m"', False)
+    ])
+
+    # Step 11: Xs -> H38
+    curr = add_step_block(ws1, curr, 11, "Menentukan Xs", [
+        (False, "Xs = Ls × (1 - Ls² / (40·Rc²))", "=H28*(1-(H28^2)/(40*(H15^2)))", '0.0000" m"', False)
+    ])
+
+    # Step 12: Ys -> H40
+    curr = add_step_block(ws1, curr, 12, "Menentukan Ys", [
+        (False, "Ys = Ls² / (6·Rc)", "=(H28^2)/(6*H15)", '0.0000" m"', False)
+    ])
+
+    # Step 13: P -> H42
+    curr = add_step_block(ws1, curr, 13, "Menentukan P (Pergeseran Tangen)", [
+        (False, "P = Ys - Rc × (1 - cos(θs))", "=H40-H15*(1-COS(RADIANS(H30)))", '0.0000" m"', False)
+    ])
+
+    # Step 14: K -> H44
+    curr = add_step_block(ws1, curr, 14, "Menentukan K", [
+        (False, "K = Xs - Rc × sin(θs)", "=H38-H15*SIN(RADIANS(H30))", '0.0000" m"', False)
+    ])
+
+    # Step 15: Es -> H46
+    curr = add_step_block(ws1, curr, 15, "Menentukan Es (Jarak Eksternal)", [
+        (False, "Es = (Rc + P) / cos(Δ/2) - Rc", "=(H15+H42)/COS(RADIANS(D4/2))-H15", '0.0000" m"', False)
+    ])
+
+    # Step 16: Ts -> H48
+    curr = add_step_block(ws1, curr, 16, "Menentukan Ts (Panjang Tangen)", [
+        (False, "Ts = (Rc + P) × tan(Δ/2) + K", "=(H15+H42)*TAN(RADIANS(D4/2))+H44", '0.0000" m"', False)
+    ])
+
+    # Step 17: Stasioning & V_aman -> H50, H51, H52, H53
+    curr = add_step_block(ws1, curr, 17, "Kontrol Kecepatan Aman & Stasioning", [
+        (False, "V_aman = √(127 × Rc × (e + f_max))", "=SQRT(127*H15*(H19+H11))", '0.00" km/jam"', False),
+        (False, "STA PI (Input Desain)", r["sta_pi"], '0.00" m"', True),
+        (False, "STA Awal Tikungan (TS / TC) = STA PI - Ts", "=H51-H48", '0.00" m"', False),
+        (False, "STA Akhir Tikungan (ST / CT) = STA Awal + Ltotal", "=H52+H36", '0.00" m"', False),
+    ])
+
+    # =========================================================================
+    # SHEET 2: PERHITUNGAN ALINYEMEN VERTIKAL (FORMAT LANGKAH DEMI LANGKAH)
+    # =========================================================================
+    ws2 = wb.create_sheet(title="Alinyemen Vertikal")
+    for col_l, w in col_widths.items():
+        ws2.column_dimensions[col_l].width = w
+
+    ws2.merge_cells("A1:I1")
+    ws2["A1"] = "PERHITUNGAN ALINYEMEN VERTIKAL (LENGKUNG VERTIKAL PARABOLA)"
+    ws2["A1"].font = font_title
+    ws2["A1"].fill = fill_cream
+    ws2["A1"].alignment = align_c
+    ws2.row_dimensions[1].height = 26
+    apply_border_range(ws2, "A1:I1", border_box)
+
+    # Parameter Dasar Alinyemen Vertikal (Baris 2 - 5)
+    inputs_v = [
+        (2, "Kecepatan Rencana (Vr)", r["V"], '0.0" km/jam"', fill_yellow, "=D2/3.6", '0.0000" m/s"'),
+        (3, "Waktu Reaksi Pengemudi (t)", 2.5, '0.0" s"', fill_grey, "=D3", '0.0" s"'),
+        (4, "Koefisien Gesek Memanjang (fm)", 0.40, "0.00", fill_grey, "=D4", "0.00"),
+        (5, "Jarak Pandang Henti (Jh)", "=0.278*D2*D3 + (D2^2)/(254*D4)", '0.00" m"', None, "=D5", '0.00" m"'),
+    ]
+
+    for row_idx, label, val_in, fmt_in, fill_in, formula_h, fmt_h in inputs_v:
+        ws2.row_dimensions[row_idx].height = 22
+        ws2.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=3)
+        ws2.merge_cells(start_row=row_idx, start_column=4, end_row=row_idx, end_column=6)
+        ws2.merge_cells(start_row=row_idx, start_column=8, end_row=row_idx, end_column=9)
+
+        c_lbl = ws2.cell(row=row_idx, column=1, value=label)
+        c_lbl.font = font_reg
+        c_lbl.alignment = align_c
+
+        c_val = ws2.cell(row=row_idx, column=4, value=val_in)
+        c_val.font = font_reg
+        c_val.alignment = align_c
+        c_val.number_format = fmt_in
+        if fill_in:
+            for c_i in range(4, 7):
+                ws2.cell(row=row_idx, column=c_i).fill = fill_in
+
+        c_eq = ws2.cell(row=row_idx, column=7, value="=")
+        c_eq.font = font_bold
+        c_eq.alignment = align_c
+
+        c_res = ws2.cell(row=row_idx, column=8, value=formula_h)
+        c_res.font = font_bold if row_idx == 5 else font_reg
+        c_res.alignment = align_c
+        c_res.number_format = fmt_h
+
+        apply_border_range(ws2, f"A{row_idx}:I{row_idx}", border_cell)
+
+    # Loop untuk setiap PVI yang memiliki lengkung vertikal
+    curr_v = 7
+    if pvi_data is not None and len(pvi_data["kurva"]) > 0:
+        for idx_k, k in enumerate(pvi_data["kurva"], start=1):
+            ws2.merge_cells(start_row=curr_v, start_column=1, end_row=curr_v, end_column=9)
+            c_pvi_banner = ws2.cell(
+                row=curr_v, column=1,
+                value=f"PERHITUNGAN LENGKUNG VERTIKAL PVI-{idx_k} ({k['jenis'].upper()})"
+            )
+            c_pvi_banner.font = font_title
+            c_pvi_banner.fill = fill_cream
+            c_pvi_banner.alignment = align_c
+            ws2.row_dimensions[curr_v].height = 24
+            apply_border_range(ws2, f"A{curr_v}:I{curr_v}", border_box)
+            curr_v += 1
+
+            r_sta = curr_v
+            r_el = curr_v + 1
+            r_g1 = curr_v + 2
+            r_g2 = curr_v + 3
+
+            pvi_in_rows = [
+                (r_sta, f"STA PVI-{idx_k}", k["sta"], '0.00" m"', fill_yellow, f"=D{r_sta}", '0.00" m"'),
+                (r_el, f"Elevasi PVI-{idx_k}", k["el"], '0.000" m"', fill_yellow, f"=D{r_el}", '0.000" m"'),
+                (r_g1, "Kelandaian Masuk (g1)", k["g1"], "0.00%", fill_yellow, f"=D{r_g1}*100", '0.00" %"'),
+                (r_g2, "Kelandaian Keluar (g2)", k["g2"], "0.00%", fill_yellow, f"=D{r_g2}*100", '0.00" %"'),
+            ]
+            for r_i, lbl_i, v_i, fmt_i, fl_i, f_h, fmt_h in pvi_in_rows:
+                ws2.row_dimensions[r_i].height = 22
+                ws2.merge_cells(start_row=r_i, start_column=1, end_row=r_i, end_column=3)
+                ws2.merge_cells(start_row=r_i, start_column=4, end_row=r_i, end_column=6)
+                ws2.merge_cells(start_row=r_i, start_column=8, end_row=r_i, end_column=9)
+
+                ws2.cell(row=r_i, column=1, value=lbl_i).alignment = align_c
+                ws2.cell(row=r_i, column=1).font = font_reg
+
+                cv = ws2.cell(row=r_i, column=4, value=v_i)
+                cv.font = font_reg
+                cv.alignment = align_c
+                cv.number_format = fmt_i
+                for ci in range(4, 7):
+                    ws2.cell(row=r_i, column=ci).fill = fl_i
+
+                ceq = ws2.cell(row=r_i, column=7, value="=")
+                ceq.font = font_bold
+                ceq.alignment = align_c
+
+                ch = ws2.cell(row=r_i, column=8, value=f_h)
+                ch.font = font_reg
+                ch.alignment = align_c
+                ch.number_format = fmt_h
+
+                apply_border_range(ws2, f"A{r_i}:I{r_i}", border_cell)
+
+            curr_v = r_g2 + 1
+
+            # Step 1 Vertikal: Perbedaan Aljabar Kelandaian (A)
+            r_A = curr_v + 1
+            curr_v = add_step_block(ws2, curr_v, 1, "Menghitung Perbedaan Aljabar Kelandaian (A)", [
+                (False, "A = g2 - g1 (%)", f"=H{r_g2}-H{r_g1}", '0.00" %"', False)
+            ])
+
+            # Step 2 Vertikal: Panjang Lengkung Vertikal Minimum (Lv min) berdasarkan Jh
+            r_lv_jh = curr_v + 2
+            r_lv_vr = curr_v + 4
+            curr_v = add_step_block(ws2, curr_v, 2, "Menghitung Panjang Lengkung Vertikal Minimum (Lv min)", [
+                (True, "Berdasarkan Jarak Pandang Henti (Jh) — Bina Marga", None, None, False),
+                (
+                    False,
+                    "Cembung (A<0): |A|·Jh²/399  |  Cekung (A>0): |A|·Jh²/(120+3.5·Jh)",
+                    f"=IF(H{r_A}<0, IF(ABS(H{r_A})*(H5^2)/399 < H5, 2*H5 - 399/ABS(H{r_A}), ABS(H{r_A})*(H5^2)/399), IF(ABS(H{r_A})*(H5^2)/(120+3.5*H5) < H5, 2*H5 - (120+3.5*H5)/ABS(H{r_A}), ABS(H{r_A})*(H5^2)/(120+3.5*H5)))",
+                    '0.00" m"',
+                    False
+                ),
+                (True, "Berdasarkan Syarat Kenyamanan & Kecepatan Rencana (Vr)", None, None, False),
+                (False, "Lv_syarat = MAX(0.6 × Vr, Vr × 3 / 3.6)", "=MAX(0.6*D2, D2*3/3.6)", '0.00" m"', False),
+            ])
+
+            # Step 3 Vertikal: Menentukan Lv Rencana (Dibulatkan kelipatan 10 m)
+            r_lv_pakai = curr_v + 1
+            curr_v = add_step_block(ws2, curr_v, 3, "Menentukan Panjang Lengkung Vertikal Rencana (Lv)", [
+                (False, "Lv rencana ≥ MAX(Lv_Jh, Lv_syarat), diambil Lv rencana", f"=CEILING(MAX(H{r_lv_jh}, H{r_lv_vr}), 10)", '0.00" m"', True)
+            ])
+
+            # Step 4 Vertikal: Pergeseran Vertikal (Ev)
+            curr_v = add_step_block(ws2, curr_v, 4, "Menghitung Pergeseran Vertikal dari PVI (Ev)", [
+                (False, "Ev = (|A| × Lv) / 800", f"=(ABS(H{r_A})*H{r_lv_pakai})/800", '0.000" m"', False)
+            ])
+
+            # Step 5 Vertikal: Stasioning & Elevasi Titik Penting (BVC, PVI, EVC)
+            curr_v = add_step_block(ws2, curr_v, 5, "Menentukan Stasioning & Elevasi Titik Penting (BVC & EVC)", [
+                (False, "STA BVC (Awal Lengkung) = STA PVI - Lv/2", f"=D{r_sta}-(H{r_lv_pakai}/2)", '0.00" m"', False),
+                (False, "STA EVC (Akhir Lengkung) = STA PVI + Lv/2", f"=D{r_sta}+(H{r_lv_pakai}/2)", '0.00" m"', False),
+                (False, "Elevasi BVC = Elevasi PVI - g1 × (Lv/2)", f"=D{r_el}-D{r_g1}*(H{r_lv_pakai}/2)", '0.000" m"', False),
+                (False, "Elevasi EVC = Elevasi PVI + g2 × (Lv/2)", f"=D{r_el}+D{r_g2}*(H{r_lv_pakai}/2)", '0.000" m"', False),
+            ])
+
+            curr_v += 1  # Jarak 1 baris antar PVI
+    else:
+        ws2["A7"] = "Tidak ada titik belok vertikal (PVI) dengan perubahan kelandaian."
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -466,8 +790,8 @@ def export_dxf_full_autocad(x_h, y_h, z_e, s_v, r_dict, B_w, nx_v, ny_v):
         lines.extend(["0", "VERTEX", "8", "AS_JALAN_3D", "10", f"{float(x):.3f}", "20", f"{float(y):.3f}", "30", f"{float(z):.3f}"])
     lines.extend(["0", "SEQEND"])
 
-    xl, yl = x_h + (B_w/2) * nx_v, y_h + (B_w/2) * ny_v
-    xr, yr = x_h - (B_w/2) * nx_v, y_h - (B_w/2) * ny_v
+    xl, yl = x_h + (B_w / 2) * nx_v, y_h + (B_w / 2) * ny_v
+    xr, yr = x_h - (B_w / 2) * nx_v, y_h - (B_w / 2) * ny_v
 
     lines.extend(["0", "POLYLINE", "8", "TEPI_KIRI_3D", "66", "1", "70", "8"])
     for x, y, z in zip(xl, yl, z_e):
@@ -486,8 +810,7 @@ def export_dxf_full_autocad(x_h, y_h, z_e, s_v, r_dict, B_w, nx_v, ny_v):
     lines.extend(["0", "SEQEND"])
 
     lines.extend(["0", "ENDSEC", "0", "EOF"])
-    return "
-".join(lines)
+    return "\n".join(lines)
 
 # ----------------------------------------------------------------------------
 # 5. TAMPILAN APLIKASI UTAMA
@@ -511,8 +834,8 @@ with tab1:
     fig_2d = go.Figure()
     
     # 1. Badan Jalan (Arsiran Abu-abu Lembut) + Tepi Kiri & Kanan
-    xl, yl = x_horiz + (B/2) * nx, y_horiz + (B/2) * ny
-    xr, yr = x_horiz - (B/2) * nx, y_horiz - (B/2) * ny
+    xl, yl = x_horiz + (B / 2) * nx, y_horiz + (B / 2) * ny
+    xr, yr = x_horiz - (B / 2) * nx, y_horiz - (B / 2) * ny
     
     fig_2d.add_trace(go.Scatter(
         x=np.concatenate([xl, xr[::-1]]),
@@ -717,7 +1040,7 @@ with tab2:
     sta_0 = r["sta_awal"]
     
     if r["jenis"].startswith("Full"):
-        s_start_trans = - (2.0 / 3.0) * ls_val
+        s_start_trans = -(2.0 / 3.0) * ls_val
         s_full_start = (1.0 / 3.0) * ls_val
         s_full_end = ltot_val - (1.0 / 3.0) * ls_val
         s_end_trans = ltot_val + (2.0 / 3.0) * ls_val
@@ -1141,3 +1464,4 @@ with tab5:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
+    

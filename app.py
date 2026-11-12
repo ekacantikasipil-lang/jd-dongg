@@ -368,7 +368,7 @@ else:
     z_elev = np.zeros_like(s_vals)
 
 # ----------------------------------------------------------------------------
-# 4. EXPORT ENGINE (EXCEL BM 2021 & DXF)
+# 4. EXPORT ENGINE (EXCEL BM 2021 & DXF COMPATIBLE AUTOCAD)
 # ----------------------------------------------------------------------------
 def generate_excel_bm2021(r, pvi_data):
     wb = openpyxl.Workbook()
@@ -553,26 +553,60 @@ def generate_excel_bm2021(r, pvi_data):
     return buf.getvalue()
 
 def export_dxf_full_autocad(x_h, y_h, z_h, s_arr, r_dict, b_width, nx_arr, ny_arr):
+    # Format DXF standar ASCII R12 (AC1009) yang kompatibel penuh & langsung tampil di AutoCAD 2021
     dxf = [
-        "0", "SECTION", "2", "HEADER", "0", "ENDSEC",
-        "0", "SECTION", "2", "TABLES",
-        "0", "TABLE", "2", "LAYER",
-        "0", "LAYER", "2", "AS_JALAN", "70", "0", "62", "3", "0", "ENDTAB",
-        "0", "TABLE", "2", "LTYPE", "0", "ENDTAB",
-        "0", "ENDSEC",
-        "0", "SECTION", "2", "ENTITIES"
+        "  0", "SECTION",
+        "  2", "HEADER",
+        "  9", "$ACADVER",
+        "  1", "AC1009",
+        "  0", "ENDSEC",
+        "  0", "SECTION",
+        "  2", "TABLES",
+        "  0", "TABLE",
+        "  2", "LAYER",
+        " 70", "3",
+        "  0", "LAYER",
+        "  2", "AS_JALAN",
+        " 70", "0",
+        " 62", "3",
+        "  0", "LAYER",
+        "  2", "TEPI_KIRI",
+        " 70", "0",
+        " 62", "1",
+        "  0", "LAYER",
+        "  2", "TEPI_KANAN",
+        " 70", "0",
+        " 62", "5",
+        "  0", "ENDTAB",
+        "  0", "ENDSEC",
+        "  0", "SECTION",
+        "  2", "ENTITIES"
     ]
+    
     xl, yl = x_h + (b_width / 2) * nx_arr, y_h + (b_width / 2) * ny_arr
     xr, yr = x_h - (b_width / 2) * nx_arr, y_h - (b_width / 2) * ny_arr
 
     for i in range(len(x_h) - 1):
-        dxf.extend(["0", "LINE", "8", "AS_JALAN", "10", f"{x_h[i]:.4f}", "20", f"{y_h[i]:.4f}", "30", f"{z_h[i]:.4f}",
-                    "11", f"{x_h[i+1]:.4f}", "21", f"{y_h[i+1]:.4f}", "31", f"{z_h[i+1]:.4f}"])
-        dxf.extend(["0", "LINE", "8", "TEPI_KIRI", "10", f"{xl[i]:.4f}", "20", f"{yl[i]:.4f}", "30", f"{z_h[i]:.4f}",
-                    "11", f"{xl[i+1]:.4f}", "21", f"{yl[i+1]:.4f}", "31", f"{z_h[i+1]:.4f}"])
-        dxf.extend(["0", "LINE", "8", "TEPI_KANAN", "10", f"{xr[i]:.4f}", "20", f"{yr[i]:.4f}", "30", f"{z_h[i]:.4f}",
-                    "11", f"{xr[i+1]:.4f}", "21", f"{yr[i+1]:.4f}", "31", f"{z_h[i+1]:.4f}"])
-    dxf.extend(["0", "ENDSEC", "0", "EOF"])
+        # As Jalan
+        dxf.extend([
+            "  0", "LINE", "  8", "AS_JALAN",
+            " 10", f"{x_h[i]:.4f}", " 20", f"{y_h[i]:.4f}", " 30", f"{z_h[i]:.4f}",
+            " 11", f"{x_h[i+1]:.4f}", " 21", f"{y_h[i+1]:.4f}", " 31", f"{z_h[i+1]:.4f}"
+        ])
+        # Tepi Kiri
+        dxf.extend([
+            "  0", "LINE", "  8", "TEPI_KIRI",
+            " 10", f"{xl[i]:.4f}", " 20", f"{yl[i]:.4f}", " 30", f"{z_h[i]:.4f}",
+            " 11", f"{xl[i+1]:.4f}", " 21", f"{yl[i+1]:.4f}", " 31", f"{z_h[i+1]:.4f}"
+        ])
+        # Tepi Kanan
+        dxf.extend([
+            "  0", "LINE", "  8", "TEPI_KANAN",
+            " 10", f"{xr[i]:.4f}", " 20", f"{yr[i]:.4f}", " 30", f"{z_h[i]:.4f}",
+            " 11", f"{xr[i+1]:.4f}", " 21", f"{yr[i+1]:.4f}", " 31", f"{z_h[i+1]:.4f}"
+        ])
+        
+    dxf.extend(["  0", "ENDSEC", "  0", "EOF"])
     return "\n".join(dxf).encode('utf-8')
 
 # ----------------------------------------------------------------------------
@@ -859,7 +893,7 @@ with tab3:
 # ----------------------------------------------------------------------------
 with tab4:
     st.markdown("<h3 style='color: #3A0056;'>📐 Unduh Berkas Gambar Kerja AutoCAD (.DXF)</h3>", unsafe_allow_html=True)
-    st.markdown("Unduh berkas hasil desain geometris dalam format **DXF** yang siap dibuka langsung di Autodesk AutoCAD atau Civil 3D.")
+    st.markdown("Unduh berkas hasil desain geometris dalam format **DXF (AutoCAD R12/2021)** yang sudah dilengkapi layer `AS_JALAN`, `TEPI_KIRI`, dan `TEPI_KANAN`.")
     
     dxf_out = export_dxf_full_autocad(x_horiz, y_horiz, z_elev, s_vals, r, B, nx, ny)
     st.download_button(

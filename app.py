@@ -361,12 +361,6 @@ if "pvi_df" not in st.session_state:
         "Lv Manual (m)": [0.0, 0.0, 0.0, 0.0]
     })
 
-if "tanah_df" not in st.session_state:
-    st.session_state.tanah_df = pd.DataFrame({
-        "STA (m)": [0.0, 125.0, 250.0, 375.0, 500.0, 625.0, 750.0],
-        "Elevasi Tanah (m)": [101.0, 103.5, 104.0, 102.5, 101.8, 105.0, 106.5]
-    })
-
 P_global = hitung_profil(st.session_state.pvi_df, V)
 if P_global is not None:
     z_elev = np.interp(s_vals, P_global["x"], P_global["y"])
@@ -374,7 +368,7 @@ else:
     z_elev = np.zeros_like(s_vals)
 
 # ----------------------------------------------------------------------------
-# 4. EXPORT ENGINE (EXCEL BM 2021)
+# 4. EXPORT ENGINE (EXCEL BM 2021 & DXF)
 # ----------------------------------------------------------------------------
 def generate_excel_bm2021(r, pvi_data):
     wb = openpyxl.Workbook()
@@ -489,14 +483,6 @@ def generate_excel_bm2021(r, pvi_data):
                     ws.cell(row=cur_r, column=9).fill = fill_grey
 
         apply_border_range(ws, f"A{start_r}:I{end_r}", border_box)
-        for r_i in range(start_r, end_r + 1):
-            for c_i in range(1, 10):
-                cell = ws.cell(row=r_i, column=c_i)
-                b_top = med if r_i == start_r else thin
-                b_bot = med if r_i == end_r else thin
-                b_left = med if c_i in (1, 2) else (thin if c_i in (7, 8) else None)
-                b_right = med if c_i in (1, 9) else (thin if c_i in (6, 7) else None)
-                cell.border = Border(top=b_top, bottom=b_bot, left=b_left, right=b_right)
         return end_r + 1
 
     curr = 10
@@ -566,8 +552,31 @@ def generate_excel_bm2021(r, pvi_data):
     wb.save(buf)
     return buf.getvalue()
 
+def export_dxf_full_autocad(x_h, y_h, z_h, s_arr, r_dict, b_width, nx_arr, ny_arr):
+    dxf = [
+        "0", "SECTION", "2", "HEADER", "0", "ENDSEC",
+        "0", "SECTION", "2", "TABLES",
+        "0", "TABLE", "2", "LAYER",
+        "0", "LAYER", "2", "AS_JALAN", "70", "0", "62", "3", "0", "ENDTAB",
+        "0", "TABLE", "2", "LTYPE", "0", "ENDTAB",
+        "0", "ENDSEC",
+        "0", "SECTION", "2", "ENTITIES"
+    ]
+    xl, yl = x_h + (b_width / 2) * nx_arr, y_h + (b_width / 2) * ny_arr
+    xr, yr = x_h - (b_width / 2) * nx_arr, y_h - (b_width / 2) * ny_arr
+
+    for i in range(len(x_h) - 1):
+        dxf.extend(["0", "LINE", "8", "AS_JALAN", "10", f"{x_h[i]:.4f}", "20", f"{y_h[i]:.4f}", "30", f"{z_h[i]:.4f}",
+                    "11", f"{x_h[i+1]:.4f}", "21", f"{y_h[i+1]:.4f}", "31", f"{z_h[i+1]:.4f}"])
+        dxf.extend(["0", "LINE", "8", "TEPI_KIRI", "10", f"{xl[i]:.4f}", "20", f"{yl[i]:.4f}", "30", f"{z_h[i]:.4f}",
+                    "11", f"{xl[i+1]:.4f}", "21", f"{yl[i+1]:.4f}", "31", f"{z_h[i+1]:.4f}"])
+        dxf.extend(["0", "LINE", "8", "TEPI_KANAN", "10", f"{xr[i]:.4f}", "20", f"{yr[i]:.4f}", "30", f"{z_h[i]:.4f}",
+                    "11", f"{xr[i+1]:.4f}", "21", f"{yr[i+1]:.4f}", "31", f"{z_h[i+1]:.4f}"])
+    dxf.extend(["0", "ENDSEC", "0", "EOF"])
+    return "\n".join(dxf).encode('utf-8')
+
 # ----------------------------------------------------------------------------
-# 5. TAMPILAN APLIKASI UTAMA (DENGAN TAB GAMBAR AUTOCAD & PARAMETER)
+# 5. TAMPILAN APLIKASI UTAMA (DENGAN TAB DOWNLOAD CAD BERSIH)
 # ----------------------------------------------------------------------------
 st.markdown("<h1 style='color: #3A0056; text-align: center; font-weight: 800;'>🌸 Geometri Jalan Interaktif & Simulasi 3D</h1>", unsafe_allow_html=True)
 
@@ -575,7 +584,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📍 Denah Tikungan (2D)", 
     "📈 Diagram Superelevasi", 
     "🚘 Simulasi 3D Mobil Jalan", 
-    "📐 Gambar AutoCAD & Parameter",
+    "📐 Download File AutoCAD (.DXF)",
     "📋 Tabel Hitungan & Excel"
 ])
 
@@ -846,85 +855,21 @@ with tab3:
     st.plotly_chart(fig_3d, use_container_width=True)
 
 # ----------------------------------------------------------------------------
-# TAB 4: GAMBAR AUTOCAD & PARAMETER (PENGGANTI PROFIL MEMANJANG)
+# TAB 4: DOWNLOAD BERKAS CAD (.DXF)
 # ----------------------------------------------------------------------------
 with tab4:
-    st.markdown("<h3 style='color: #3A0056;'>📐 Sketsa Teknik & Parameter Geometri Tikungan (Format CAD)</h3>", unsafe_allow_html=True)
-    st.markdown("Berikut adalah diagram skematis simetris tikungan lengkap dengan nilai parameter hitungan nyata ($R_{min}$, $R_c$, $T_s$, $E_s$, dll.) sesuai standar Bina Marga.")
-
-    # Membuat plot sketsa teknik layaknya gambar AutoCAD (Simetris & Berdimensi)
-    fig_cad = go.Figure()
-
-    # Koordinat skematis simetris untuk ilustrasi CAD
-    # Tangen masuk dan keluar
-    fig_cad.add_trace(go.Scatter(x=[-250, -50], y=[0, 0], mode='lines', name='Tangen Masuk', line=dict(color='#1565C0', width=2, dash='dash')))
-    fig_cad.add_trace(go.Scatter(x=[50, 250], y=[0, 0], mode='lines', name='Tangen Keluar', line=dict(color='#1565C0', width=2, dash='dash')))
+    st.markdown("<h3 style='color: #3A0056;'>📐 Unduh Berkas Gambar Kerja AutoCAD (.DXF)</h3>", unsafe_allow_html=True)
+    st.markdown("Unduh berkas hasil desain geometris dalam format **DXF** yang siap dibuka langsung di Autodesk AutoCAD atau Civil 3D.")
     
-    # Titik PI
-    fig_cad.add_trace(go.Scatter(x=[0], y=[120], mode='markers+text', name='Titik PI', marker=dict(size=12, color='#111111', symbol='square'), text=["<b>PI</b>"], textposition="top center"))
-    fig_cad.add_trace(go.Scatter(x=[-50, 0, 50], y=[0, 120, 0], mode='lines', name='Garis Singgung PI', line=dict(color='#9E9E9E', width=1, dash='dot'), showlegend=False))
-
-    # Kurva Spiral - Circle - Spiral (Simetris)
-    x_arc = np.linspace(-50, 50, 100)
-    y_arc = 35 * (1 - np.cos(x_arc * np.pi / 100))
-    fig_cad.add_trace(go.Scatter(x=x_arc, y=y_arc, mode='lines', name='Busur Tikungan (Rc)', line=dict(color='#C2185B', width=3.5)))
-
-    # Titik Penting (TS, SC, CS, ST atau TC, CT)
-    pts_cad_x = [-120, -50, 50, 120]
-    pts_cad_y = [0, 15, 15, 0]
-    is_fc = r["jenis"].startswith("Full")
-    lbl_pts = ["TC", "CT", "", ""] if is_fc else ["TS", "SC", "CS", "ST"]
-
-    fig_cad.add_trace(go.Scatter(
-        x=pts_cad_x[:2] + pts_cad_x[2:], y=pts_cad_y[:2] + pts_cad_y[2:],
-        mode='markers+text', name='Titik Penting',
-        marker=dict(size=10, color='#D50000', symbol='circle'),
-        text=lbl_pts, textposition="bottom center",
-        textfont=dict(color="#880E4F", size=12, family="monospace")
-    ))
-
-    # Anotasi Teks Keterangan Parameter Persis Seperti Permintaan (Rmin, Rc, Ts, Es, Ls, dll.)
-    annotations_cad = [
-        dict(x=-180, y=35, text=f"<b>Rmin = {r['Rmin']:.2f} m</b><br>(Acuan TPGJAK)", showarrow=False, bgcolor="#FFF9C4", bordercolor="#FBC02D", borderwidth=1, borderpad=4),
-        dict(x=180, y=35, text=f"<b>Rc = {r['Rc']:.2f} m</b><br>(Jari-Jari Rencana)", showarrow=False, bgcolor="#C8E6C9", bordercolor="#43A047", borderwidth=1, borderpad=4),
-        dict(x=0, y=75, text=f"<b>Es = {r['E']:.3f} m</b><br>(Jarak Eksternal)", showarrow=False, bgcolor="#E1F5FE", bordercolor="#03A9F4", borderwidth=1, borderpad=4),
-        dict(x=-140, y=-15, text=f"<b>Ts = {r['T']:.3f} m</b><br>(Panjang Tangen)", showarrow=False, bgcolor="#FCE4EC", bordercolor="#E91E63", borderwidth=1, borderpad=4),
-        dict(x=0, y=42, text=f"<b>Lc = {r['Lc']:.2f} m</b><br><b>Ls = {r['Ls']:.2f} m</b>", showarrow=False, bgcolor="#F3E5F5", bordercolor="#AB47BC", borderwidth=1, borderpad=4),
-        dict(x=0, y=135, text=f"<b>Sudut Δ = {r['delta']:.2f}°</b>", showarrow=False, font=dict(size=13, color="#3A0056")),
-    ]
-
-    fig_cad.update_layout(
-        title=dict(text=f"Layout Sketsa Teknik CAD — {r['jenis']} (Simetris)", font=dict(color='#3A0056', size=18, family="Arial"), x=0.5, xanchor='center'),
-        xaxis=dict(title="Sumbu X (m)", showgrid=True, zeroline=True, gridcolor='#E0E0E0'),
-        yaxis=dict(title="Sumbu Y (m)", showgrid=True, zeroline=True, gridcolor='#E0E0E0', scaleanchor="x", scaleratio=1),
-        annotations=annotations_cad,
-        plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
-        height=580,
-        legend=dict(bgcolor="rgba(255,255,255,0.9)", bordercolor="#BDBDBD", borderwidth=1)
-    )
-    st.plotly_chart(fig_cad, use_container_width=True)
-
-    st.markdown("---")
-    st.markdown("### 📥 Unduh Berkas CAD (.DXF) & Laporan")
     dxf_out = export_dxf_full_autocad(x_horiz, y_horiz, z_elev, s_vals, r, B, nx, ny)
-    col_dl1, col_dl2 = st.columns(2)
-    with col_dl1:
-        st.download_button(
-            "📐 Unduh Gambar AutoCAD / Civil 3D (.DXF Multi-Layer)",
-            dxf_out, file_name="Geometri_Jalan_BinaMarga.dxf", mime="application/dxf",
-            use_container_width=True
-        )
-    with col_dl2:
-        excel_bytes = generate_excel_bm2021(r, P_global)
-        st.download_button(
-            "📊 Unduh Laporan Excel Ber-Formula Otomatis (.XLSX)",
-            excel_bytes, file_name="Perhitungan_Geometri_Jalan_BM2021.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
+    st.download_button(
+        "📐 Unduh Berkas AutoCAD / Civil 3D (.DXF Multi-Layer)",
+        dxf_out, file_name="Geometri_Jalan_BinaMarga.dxf", mime="application/dxf",
+        use_container_width=True
+    )
 
 # ----------------------------------------------------------------------------
-# TAB 5: TABEL HITUNGAN & EXCEL REPORT
+# TAB 5: TABEL HITUNGAN & EXCEL
 # ----------------------------------------------------------------------------
 with tab5:
     st.markdown("<h3 style='color: #3A0056;'>📋 Tabel Hasil Perhitungan Tikungan & Laporan Excel</h3>", unsafe_allow_html=True)

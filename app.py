@@ -710,101 +710,13 @@ def generate_excel_bm2021(r, pvi_data):
 
 
 def export_dxf_full_autocad(x_h, y_h, z_e, s_v, r_dict, B_w, nx_v, ny_v):
-    # Hitung koordinat tepi kiri & kanan
+    # Hitung koordinat tepi kiri & kanan (2D Denah)
     xl = x_h + (B_w / 2.0) * nx_v
     yl = y_h + (B_w / 2.0) * ny_v
     xr = x_h - (B_w / 2.0) * nx_v
     yr = y_h - (B_w / 2.0) * ny_v
 
-    # Offset vertikal untuk profil memanjang di bawah denah
-    y_off = float(np.min(y_h)) - 120.0
-
-    # Hitung batas bounding box gambar agar AutoCAD langsung Zoom ke objek
-    all_x = np.concatenate([x_h, xl, xr, s_v])
-    all_y = np.concatenate([y_h, yl, yr, y_off + z_e])
-    xmin, xmax = float(np.min(all_x)) - 20.0, float(np.max(all_x)) + 20.0
-    ymin, ymax = float(np.min(all_y)) - 20.0, float(np.max(all_y)) + 20.0
-    zmin, zmax = float(np.min(z_e)) - 10.0, float(np.max(z_e)) + 10.0
-
-    lines = [
-        # 1. HEADER LENGKAP (Standar AutoCAD R12 / AC1009)
-        "0", "SECTION",
-        "2", "HEADER",
-        "9", "$ACADVER", "1", "AC1009",
-        "9", "$INSBASE", "10", "0.0", "20", "0.0", "30", "0.0",
-        "9", "$EXTMIN", "10", f"{xmin:.3f}", "20", f"{ymin:.3f}", "30", f"{zmin:.3f}",
-        "9", "$EXTMAX", "10", f"{xmax:.3f}", "20", f"{ymax:.3f}", "30", f"{zmax:.3f}",
-        "9", "$LIMMIN", "10", f"{xmin:.3f}", "20", f"{ymin:.3f}",
-        "9", "$LIMMAX", "10", f"{xmax:.3f}", "20", f"{ymax:.3f}",
-        "0", "ENDSEC",
-
-        # 2. TABLES (LTYPE & LAYER WAJIB ADA)
-        "0", "SECTION",
-        "2", "TABLES",
-        "0", "TABLE", "2", "LTYPE", "70", "1",
-        "0", "LTYPE", "2", "CONTINUOUS", "70", "0", "3", "Solid line", "72", "65", "73", "0", "40", "0.0",
-        "0", "ENDTAB",
-
-        "0", "TABLE", "2", "LAYER", "70", "6",
-        "0", "LAYER", "2", "0", "70", "0", "62", "7", "6", "CONTINUOUS",
-        "0", "LAYER", "2", "AS_JALAN_3D", "70", "0", "62", "7", "6", "CONTINUOUS",
-        "0", "LAYER", "2", "TEPI_KIRI_3D", "70", "0", "62", "1", "6", "CONTINUOUS",
-        "0", "LAYER", "2", "TEPI_KANAN_3D", "70", "0", "62", "5", "6", "CONTINUOUS",
-        "0", "LAYER", "2", "GARIS_TANGEN", "70", "0", "62", "3", "6", "CONTINUOUS",
-        "0", "LAYER", "2", "PROFIL_VERTIKAL", "70", "0", "62", "2", "6", "CONTINUOUS",
-        "0", "ENDTAB",
-        "0", "ENDSEC",
-
-        # 3. ENTITIES (OBJEK GAMBAR)
-        "0", "SECTION",
-        "2", "ENTITIES"
-    ]
-
-    # Helper untuk menulis 3D Polyline R12 yang valid
-    def add_3d_polyline(layer_name, xs, ys, zs):
-        lines.extend([
-            "0", "POLYLINE",
-            "8", layer_name,
-            "66", "1",
-            "70", "8",
-            "10", "0.0", "20", "0.0", "30", "0.0"
-        ])
-        for x, y, z in zip(xs, ys, zs):
-            lines.extend([
-                "0", "VERTEX",
-                "8", layer_name,
-                "70", "32",
-                "10", f"{float(x):.4f}",
-                "20", f"{float(y):.4f}",
-                "30", f"{float(z):.4f}"
-            ])
-        lines.extend(["0", "SEQEND", "8", layer_name])
-
-    # Helper untuk menulis 2D Polyline R12 yang valid
-    def add_2d_polyline(layer_name, xs, ys):
-        lines.extend([
-            "0", "POLYLINE",
-            "8", layer_name,
-            "66", "1",
-            "70", "0",
-            "10", "0.0", "20", "0.0", "30", "0.0"
-        ])
-        for x, y in zip(xs, ys):
-            lines.extend([
-                "0", "VERTEX",
-                "8", layer_name,
-                "10", f"{float(x):.4f}",
-                "20", f"{float(y):.4f}",
-                "30", "0.0"
-            ])
-        lines.extend(["0", "SEQEND", "8", layer_name])
-
-    # Gambar As Jalan, Tepi Kiri, Tepi Kanan (3D)
-    add_3d_polyline("AS_JALAN_3D", x_h, y_h, z_e)
-    add_3d_polyline("TEPI_KIRI_3D", xl, yl, z_e)
-    add_3d_polyline("TEPI_KANAN_3D", xr, yr, z_e)
-
-    # Gambar Garis Singgung Tangen & Titik PI (2D)
+    # Hitung titik-titik utama tikungan
     idx_start = int(np.argmin(np.abs(s_v - 0.0)))
     idx_end = int(np.argmin(np.abs(s_v - r_dict["Ltot"])))
     dx_in = x_h[idx_start + 1] - x_h[idx_start]
@@ -813,22 +725,94 @@ def export_dxf_full_autocad(x_h, y_h, z_e, s_v, r_dict, B_w, nx_v, ny_v):
     x_pi = x_h[idx_start] + r_dict["T"] * math.cos(ang_in)
     y_pi = y_h[idx_start] + r_dict["T"] * math.sin(ang_in)
 
+    # Titik pusat lingkaran (O)
+    mid_idx = idx_start if r_dict["jenis"].startswith("Full") else int(np.argmin(np.abs(s_v - (r_dict["Ltot"] / 2.0))))
+    sg_dir = 1.0 if (y_h[idx_end] - y_h[idx_start]) >= 0 else -1.0
+    x_center = x_h[mid_idx] + sg_dir * r_dict["Rc"] * nx_v[mid_idx]
+    y_center = y_h[mid_idx] + sg_dir * r_dict["Rc"] * ny_v[mid_idx]
+
+    # Batas bounding box murni untuk Denah Tikungan 2D
+    all_x = np.concatenate([x_h, xl, xr, [x_pi, x_center]])
+    all_y = np.concatenate([y_h, yl, yr, [y_pi, y_center]])
+    xmin, xmax = float(np.min(all_x)) - 20.0, float(np.max(all_x)) + 20.0
+    ymin, ymax = float(np.min(all_y)) - 20.0, float(np.max(all_y)) + 20.0
+
+    lines = [
+        "0", "SECTION", "2", "HEADER",
+        "9", "$ACADVER", "1", "AC1009",
+        "9", "$INSBASE", "10", "0.0", "20", "0.0", "30", "0.0",
+        "9", "$EXTMIN", "10", f"{xmin:.3f}", "20", f"{ymin:.3f}", "30", "0.0",
+        "9", "$EXTMAX", "10", f"{xmax:.3f}", "20", f"{ymax:.3f}", "30", "0.0",
+        "9", "$LIMMIN", "10", f"{xmin:.3f}", "20", f"{ymin:.3f}",
+        "9", "$LIMMAX", "10", f"{xmax:.3f}", "20", f"{ymax:.3f}",
+        "0", "ENDSEC",
+
+        "0", "SECTION", "2", "TABLES",
+        "0", "TABLE", "2", "LTYPE", "70", "1",
+        "0", "LTYPE", "2", "CONTINUOUS", "70", "0", "3", "Solid line", "72", "65", "73", "0", "40", "0.0",
+        "0", "ENDTAB",
+
+        "0", "TABLE", "2", "LAYER", "70", "6",
+        "0", "LAYER", "2", "0", "70", "0", "62", "7", "6", "CONTINUOUS",
+        "0", "LAYER", "2", "AS_JALAN", "70", "0", "62", "7", "6", "CONTINUOUS",
+        "0", "LAYER", "2", "TEPI_PERKERASAN", "70", "0", "62", "8", "6", "CONTINUOUS",
+        "0", "LAYER", "2", "GARIS_TANGEN", "70", "0", "62", "5", "6", "CONTINUOUS",
+        "0", "LAYER", "2", "JARI_JARI", "70", "0", "62", "3", "6", "CONTINUOUS",
+        "0", "LAYER", "2", "ANOTASI_STA", "70", "0", "62", "1", "6", "CONTINUOUS",
+        "0", "ENDTAB",
+        "0", "ENDSEC",
+
+        "0", "SECTION", "2", "ENTITIES"
+    ]
+
+    def add_2d_polyline(layer_name, xs, ys):
+        lines.extend([
+            "0", "POLYLINE", "8", layer_name, "66", "1", "70", "0",
+            "10", "0.0", "20", "0.0", "30", "0.0"
+        ])
+        for x, y in zip(xs, ys):
+            lines.extend([
+                "0", "VERTEX", "8", layer_name,
+                "10", f"{float(x):.4f}", "20", f"{float(y):.4f}", "30", "0.0"
+            ])
+        lines.extend(["0", "SEQEND", "8", layer_name])
+
+    def add_text(layer_name, x, y, height, text_val):
+        lines.extend([
+            "0", "TEXT", "8", layer_name,
+            "10", f"{float(x):.4f}", "20", f"{float(y):.4f}", "30", "0.0",
+            "40", f"{height:.2f}",
+            "1", str(text_val)
+        ])
+
+    # 1. As Jalan & Tepi Perkerasan Kiri/Kanan (2D)
+    add_2d_polyline("AS_JALAN", x_h, y_h)
+    add_2d_polyline("TEPI_PERKERASAN", xl, yl)
+    add_2d_polyline("TEPI_PERKERASAN", xr, yr)
+
+    # 2. Garis Tangen & Jari-Jari Rc
     add_2d_polyline("GARIS_TANGEN", [x_h[idx_start], x_pi, x_h[idx_end]], [y_h[idx_start], y_pi, y_h[idx_end]])
+    add_2d_polyline("JARI_JARI", [x_h[mid_idx], x_center], [y_h[mid_idx], y_center])
 
-    # Tambahkan Teks Keterangan di AutoCAD
-    lines.extend([
-        "0", "TEXT", "8", "GARIS_TANGEN",
-        "10", f"{x_pi + 2.0:.4f}", "20", f"{y_pi + 2.0:.4f}", "30", "0.0",
-        "40", "3.5",
-        "1", f"PI (Delta={r_dict['delta']:.1f} deg, Rc={r_dict['Rc']:.1f}m)",
-        "0", "TEXT", "8", "PROFIL_VERTIKAL",
-        "10", f"{float(s_v[0]):.4f}", "20", f"{y_off + float(np.max(z_e)) + 8.0:.4f}", "30", "0.0",
-        "40", "4.0",
-        "1", "PROFIL MEMANJANG VERTIKAL"
-    ])
+    # 3. Label Titik PI & Pusat R
+    add_text("ANOTASI_STA", x_pi + 2.0, y_pi + 2.0, 2.5, f"PI (STA {sta_str(r_dict['sta_pi'])}, Delta={r_dict['delta']:.1f} deg)")
+    add_text("JARI_JARI", x_center + 2.0, y_center, 2.5, f"O (R = {r_dict['Rc']:.1f} m)")
 
-    # Gambar Profil Memanjang Vertikal (2D)
-    add_2d_polyline("PROFIL_VERTIKAL", s_v, y_off + z_e)
+    # 4. Titik Utama Tikungan (TS/SC/CS/ST atau TC/CT)
+    if r_dict["jenis"].startswith("Full"):
+        add_text("ANOTASI_STA", x_h[idx_start], y_h[idx_start] - 4.0, 2.2, f"TC {sta_str(r_dict['sta_awal'])}")
+        add_text("ANOTASI_STA", x_h[idx_end], y_h[idx_end] - 4.0, 2.2, f"CT {sta_str(r_dict['sta_akhir'])}")
+    else:
+        add_text("ANOTASI_STA", x_h[idx_start], y_h[idx_start] - 4.0, 2.2, f"TS {sta_str(r_dict['sta_awal'])}")
+        add_text("ANOTASI_STA", x_h[idx_end], y_h[idx_end] - 4.0, 2.2, f"ST {sta_str(r_dict['sta_akhir'])}")
+        if r_dict["jenis"].startswith("Spiral-Spiral"):
+            idx_m = int(np.argmin(np.abs(s_v - r_dict["Ls"])))
+            add_text("ANOTASI_STA", x_h[idx_m], y_h[idx_m] - 4.0, 2.2, f"SC=CS {sta_str(r_dict['sta_awal'] + r_dict['Ls'])}")
+        else:
+            idx_sc = int(np.argmin(np.abs(s_v - r_dict["Ls"])))
+            idx_cs = int(np.argmin(np.abs(s_v - (r_dict["Ls"] + r_dict["Lc"]))))
+            add_text("ANOTASI_STA", x_h[idx_sc], y_h[idx_sc] - 4.0, 2.2, f"SC {sta_str(r_dict['sta_awal'] + r_dict['Ls'])}")
+            add_text("ANOTASI_STA", x_h[idx_cs], y_h[idx_cs] - 4.0, 2.2, f"CS {sta_str(r_dict['sta_awal'] + r_dict['Ls'] + r_dict['Lc'])}")
 
     lines.extend(["0", "ENDSEC", "0", "EOF"])
     return "\r\n".join(lines) + "\r\n"
@@ -1445,8 +1429,8 @@ with tab4:
 
     dxf_out = export_dxf_full_autocad(x_horiz, y_horiz, z_elev, s_vals, r, B, nx, ny)
     st.download_button(
-        "📐 Unduh Gambar AutoCAD / Civil 3D (.DXF Multi-Layer)",
-        dxf_out, file_name="Geometri_Jalan_BinaMarga.dxf", mime="application/dxf",
+        "📐 Unduh Denah Tikungan 2D AutoCAD (.DXF)",
+        dxf_out, file_name="Denah_Tikungan_2D.dxf", mime="application/dxf",
         use_container_width=True
     )
 

@@ -7,6 +7,7 @@ import streamlit as st
 import plotly.graph_objects as go
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Border, Side
+import ezdxf
 
 # ----------------------------------------------------------------------------
 # KONFIGURASI HALAMAN STREAMLIT & TEMA

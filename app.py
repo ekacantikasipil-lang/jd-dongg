@@ -7,7 +7,15 @@ import streamlit as st
 import plotly.graph_objects as go
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Border, Side
-import ezdxf
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from docx import Document
+from docx.shared import Mm, Pt, RGBColor
+from docx.enum.section import WD_ORIENT
+from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement, parse_xml
+from docx.oxml.ns import nsdecls, qn
 
 # ----------------------------------------------------------------------------
 # KONFIGURASI HALAMAN STREAMLIT & TEMA
@@ -362,8 +370,402 @@ else:
     z_elev = np.zeros_like(s_vals)
 
 # ----------------------------------------------------------------------------
-# 4. EXPORT ENGINE (CAD DXF R2010 LWPOLYLINE & EXCEL BM 2021)
+# 4. EXPORT ENGINE (WORD LANDSCAPE SKALATIS + ETIKET, CAD DXF & EXCEL BM 2021)
 # ----------------------------------------------------------------------------
+def generate_word_drawing_landscape(
+    x_horiz, y_horiz, s_vals, ths_, nx, ny, r, B, arah,
+    nama_proyek="PERENCANAAN GEOMETRIK JALAN RAYA",
+    instansi="LABORATORIUM REKAYASA JALAN RAYA",
+    digambar_oleh="Perencana Geometrik",
+    diperiksa_oleh="Dosen / Engineer",
+    no_gambar="GMJ-01"
+):
+    """
+    Menghasilkan file Microsoft Word (.docx) format Landscape A3 (420 x 297 mm)
+    dengan gambar denah tikungan SKALATIS (1:N tepat secara fisik di kertas)
+    dan Etiket Gambar Kerja Teknik di sisi kanan.
+    """
+    # 1. Dimensi Kertas A3 Landscape & Kotak Bingkai Gambar Kerja
+    page_w_mm = 420.0
+    page_h_mm = 297.0
+    margin_left_mm = 20.0   # Margin kiri lebih lebar standar gambar teknik (untuk jilid)
+    margin_other_mm = 10.0
+
+    inner_w_mm = page_w_mm - margin_left_mm - margin_other_mm  # 390 mm
+    inner_h_mm = page_h_mm - 2 * margin_other_mm             # 277 mm
+
+    etiket_w_mm = 90.0                                       # Lebar etiket di kanan = 90 mm
+    draw_box_w_mm = inner_w_mm - etiket_w_mm                 # Area gambar = 300 mm
+    draw_box_h_mm = inner_h_mm                               # Tinggi area gambar = 277 mm
+
+    # Padding fisik dalam mm untuk axis gambar agar ada ruang label & batas bingkai
+    pad_l_mm, pad_r_mm, pad_t_mm, pad_b_mm = 18.0, 14.0, 18.0, 20.0
+    plot_w_mm = draw_box_w_mm - pad_l_mm - pad_r_mm          # 268 mm
+    plot_h_mm = draw_box_h_mm - pad_t_mm - pad_b_mm          # 239 mm
+
+    # 2. Hitung Rentang Koordinat Dunia Nyata (meter) dan Tentukan Skala Bulat Skalatis
+    xl, yl = x_horiz + (B / 2) * nx, y_horiz + (B / 2) * ny
+    xr, yr = x_horiz - (B / 2) * nx, y_horiz - (B / 2) * ny
+
+    idx_start = np.argmin(np.abs(s_vals - 0))
+    idx_end = np.argmin(np.abs(s_vals - r["Ltot"]))
+    x_ts, y_ts = x_horiz[idx_start], y_horiz[idx_start]
+    x_st, y_st = x_horiz[idx_end], y_horiz[idx_end]
+    x_pi = x_ts + r["T"] * np.cos(ths_[idx_start])
+    y_pi = y_ts + r["T"] * np.sin(ths_[idx_start])
+
+    if r["jenis"].startswith("Full"):
+        mid_idx = idx_start
+    else:
+        mid_idx = np.argmin(np.abs(s_vals - (r["Ltot"] / 2)))
+    sg_val = 1 if arah == "Kiri" else -1
+    x_center = x_horiz[mid_idx] + sg_val * r["Rc"] * nx[mid_idx]
+    y_center = y_horiz[mid_idx] + sg_val * r["Rc"] * ny[mid_idx]
+
+    all_x = np.concatenate([xl, xr, [x_pi, x_center]])
+    all_y = np.concatenate([yl, yr, [y_pi, y_center]])
+
+    raw_dx = max(float(np.max(all_x) - np.min(all_x)), 10.0)
+    raw_dy = max(float(np.max(all_y) - np.min(all_y)), 10.0)
+
+    # Tambahkan ruang 15% untuk anotasi PI, Pusat Lingkaran, dan Patok STA
+    need_dx_m = raw_dx * 1.18
+    need_dy_m = raw_dy * 1.18
+
+    # Skala minimum: 1 mm di kertas = S meter di lapangan -> Skala 1 : (S * 1000)
+    req_scale_denom = max((need_dx_m * 1000.0) / plot_w_mm, (need_dy_m * 1000.0) / plot_h_mm)
+    standard_scales = [100, 200, 250, 500, 750, 1000, 1250, 1500, 2000, 2500, 3000, 4000, 5000, 7500, 10000, 15000, 20000, 25000, 50000]
+    scale_denom = next((sc for sc in standard_scales if sc >= req_scale_denom), int(math.ceil(req_scale_denom / 5000.0) * 5000))
+
+    # Hitung ukuran window dunia nyata (meter) yang tepat proporsional dengan ukuran fisik plot_w_mm x plot_h_mm
+    world_w_m = (plot_w_mm / 1000.0) * scale_denom
+    world_h_m = (plot_h_mm / 1000.0) * scale_denom
+
+    cx = 0.5 * (float(np.min(all_x)) + float(np.max(all_x)))
+    cy = 0.5 * (float(np.min(all_y)) + float(np.max(all_y)))
+    x_min_lim, x_max_lim = cx - world_w_m / 2.0, cx + world_w_m / 2.0
+    y_min_lim, y_max_lim = cy - world_h_m / 2.0, cy + world_h_m / 2.0
+
+    # 3. Render Gambar Vektor Resolusi Tinggi (300 DPI) dengan Ukuran Fisik Exact
+    fig_w_in = (draw_box_w_mm - 2.0) / 25.4
+    fig_h_in = (draw_box_h_mm - 2.0) / 25.4
+    fig = plt.figure(figsize=(fig_w_in, fig_h_in), dpi=300)
+
+    # Posisikan axes secara presisi dalam fraksi figure agar rasio mm-ke-meter 100% akurat
+    ax_left = pad_l_mm / draw_box_w_mm
+    ax_bottom = pad_b_mm / draw_box_h_mm
+    ax_w = plot_w_mm / draw_box_w_mm
+    ax_h = plot_h_mm / draw_box_h_mm
+    ax = fig.add_axes([ax_left, ax_bottom, ax_w, ax_h])
+
+    ax.set_xlim(x_min_lim, x_max_lim)
+    ax.set_ylim(y_min_lim, y_max_lim)
+    ax.set_aspect('equal', adjustable='box')
+
+    # Grid koordinat teknis tipis
+    ax.grid(True, which='major', linestyle=':', linewidth=0.5, color='#B0BEC5')
+    ax.tick_params(axis='both', labelsize=7, colors='#333333')
+    ax.set_xlabel("Koordinat X (m)", fontsize=8, fontweight='bold', color='#111111')
+    ax.set_ylabel("Koordinat Y (m)", fontsize=8, fontweight='bold', color='#111111')
+
+    # Badan Perkerasan & Tepi Jalan
+    poly_x = np.concatenate([xl, xr[::-1]])
+    poly_y = np.concatenate([yl, yr[::-1]])
+    ax.fill(poly_x, poly_y, facecolor='#ECEFF1', edgecolor='none', zorder=1, label='Badan Perkerasan')
+    ax.plot(xl, yl, color='#546E7A', linewidth=0.9, zorder=2, label='Tepi Perkerasan')
+    ax.plot(xr, yr, color='#546E7A', linewidth=0.9, zorder=2)
+
+    # As Jalan
+    ax.plot(x_horiz, y_horiz, color='#111111', linewidth=1.8, zorder=3, label='As Jalan (Centerline)')
+
+    # Garis Singgung Tangen & Titik PI
+    ax.plot([x_ts, x_pi, x_st], [y_ts, y_pi, y_st], color='#1565C0', linestyle='--', linewidth=1.0, zorder=3, label='Garis Tangen')
+    ax.scatter([x_pi], [y_pi], color='#111111', marker='s', s=32, zorder=5)
+    ax.annotate(
+        f"PI\nΔ = {r['delta']:.1f}°\nSTA {sta_str(r['sta_pi'])}",
+        xy=(x_pi, y_pi),
+        xytext=(8, 12 if arah == "Kanan" else -26),
+        textcoords='offset points',
+        fontsize=7, fontweight='bold', color='#111111',
+        bbox=dict(boxstyle='round,pad=0.25', facecolor='#FFFDE7', edgecolor='#9E9E9E', lw=0.6),
+        zorder=6
+    )
+
+    # Pusat Lingkaran (O) & Garis Jari-jari
+    ax.plot([x_horiz[mid_idx], x_center], [y_horiz[mid_idx], y_center], color='#2E7D32', linestyle='-.', linewidth=0.9, zorder=3, label=f"Jari-jari Rc = {r['Rc']:.0f} m")
+    ax.scatter([x_center], [y_center], color='#2E7D32', marker='+', s=60, linewidths=1.3, zorder=5)
+    ax.annotate(
+        f"O (R = {r['Rc']:.0f} m)",
+        xy=(x_center, y_center),
+        xytext=(6, -4),
+        textcoords='offset points',
+        fontsize=7, fontweight='bold', color='#1B5E20',
+        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', edgecolor='#A5D6A7', lw=0.6),
+        zorder=6
+    )
+
+    # Patok Stasioning Minor tiap 50 m
+    sta_min_plot = math.ceil((r["sta_awal"] + s_vals[0]) / 50.0) * 50.0
+    sta_max_plot = math.floor((r["sta_awal"] + s_vals[-1]) / 50.0) * 50.0
+    tick_stas = np.arange(sta_min_plot, sta_max_plot + 1, 50.0)
+    tick_half_len = max(B * 0.85, 4.5)
+    for st_val in tick_stas:
+        s_rel = st_val - r["sta_awal"]
+        if s_vals[0] <= s_rel <= s_vals[-1]:
+            idx_t = np.argmin(np.abs(s_vals - s_rel))
+            xt0, yt0 = x_horiz[idx_t], y_horiz[idx_t]
+            nxt, nyt = nx[idx_t], ny[idx_t]
+            ax.plot(
+                [xt0 - tick_half_len * nxt, xt0 + tick_half_len * nxt],
+                [yt0 - tick_half_len * nyt, yt0 + tick_half_len * nyt],
+                color='#616161', linewidth=0.8, zorder=3
+            )
+            lbl_side = -sg_val
+            ax.text(
+                xt0 + lbl_side * (tick_half_len + 2.5) * nxt,
+                yt0 + lbl_side * (tick_half_len + 2.5) * nyt,
+                sta_str(st_val, d=0),
+                fontsize=5.8, color='#424242', ha='center', va='center', zorder=4
+            )
+
+    # Titik Utama Tikungan (TC/CT atau TS/SC/CS/ST)
+    fc = r["jenis"].startswith("Full")
+    is_ss = r["jenis"].startswith("Spiral-Spiral")
+    pts_x, pts_y = [x_ts, x_st], [y_ts, y_st]
+    if fc:
+        pts_lbls = [f"TC\n{sta_str(r['sta_awal'])}", f"CT\n{sta_str(r['sta_akhir'])}"]
+    else:
+        pts_lbls = [f"TS\n{sta_str(r['sta_awal'])}", f"ST\n{sta_str(r['sta_akhir'])}"]
+        if is_ss:
+            idx_mid = np.argmin(np.abs(s_vals - r["Ls"]))
+            pts_x.append(x_horiz[idx_mid])
+            pts_y.append(y_horiz[idx_mid])
+            pts_lbls.append(f"SC=CS\n{sta_str(r['sta_awal'] + r['Ls'])}")
+        else:
+            idx_sc = np.argmin(np.abs(s_vals - r["Ls"]))
+            idx_cs = np.argmin(np.abs(s_vals - (r["Ls"] + r["Lc"])))
+            pts_x.extend([x_horiz[idx_sc], x_horiz[idx_cs]])
+            pts_y.extend([y_horiz[idx_sc], y_horiz[idx_cs]])
+            pts_lbls.extend([
+                f"SC\n{sta_str(r['sta_awal'] + r['Ls'])}",
+                f"CS\n{sta_str(r['sta_awal'] + r['Ls'] + r['Lc'])}"
+            ])
+
+    ax.scatter(pts_x, pts_y, color='#C62828', edgecolor='white', linewidth=0.8, s=36, zorder=6, label='Titik Utama Tikungan')
+    for px, py, plbl in zip(pts_x, pts_y, pts_lbls):
+        ax.annotate(
+            plbl, xy=(px, py),
+            xytext=(0, -24 if arah == "Kanan" else 14),
+            textcoords='offset points', ha='center',
+            fontsize=6.5, fontweight='bold', color='#8E0000',
+            bbox=dict(boxstyle='round,pad=0.2', facecolor='white', edgecolor='#EF9A9A', lw=0.6),
+            zorder=7
+        )
+
+    # Judul Atas Area Gambar
+    arah_txt = "TIKUNGAN KE KIRI" if arah == "Kiri" else "TIKUNGAN KE KANAN"
+    ax.set_title(
+        f"DENAH ALINYEMEN HORIZONTAL — {r['jenis'].upper()} ({arah_txt})  |  SKALA 1 : {scale_denom:,}",
+        fontsize=9.5, fontweight='bold', color='#111111', pad=8
+    )
+
+    # Legenda di Kiri Atas
+    ax.legend(loc='upper left', fontsize=6.5, frameon=True, facecolor='white', edgecolor='#BDBDBD', framealpha=0.95)
+
+    # Simbol Arah Utara (North Arrow) di Pojok Kanan Atas Plot
+    na_x = x_max_lim - 0.06 * world_w_m
+    na_y = y_max_lim - 0.12 * world_h_m
+    na_len = 0.07 * world_h_m
+    ax.annotate(
+        'U', xy=(na_x, na_y + na_len), xytext=(na_x, na_y),
+        arrowprops=dict(arrowstyle='-|>', color='#111111', lw=1.5, mutation_scale=12),
+        ha='center', va='bottom', fontsize=9, fontweight='bold', color='#111111', zorder=8
+    )
+
+    # Batang Skala Grafis (Scale Bar) Skalatis 4 cm di Kertas = (0.04 * scale_denom) meter di Lapangan
+    bar_phys_mm = 40.0  # tepat 40 mm (4 cm) di kertas A3
+    bar_real_m = (bar_phys_mm / 1000.0) * scale_denom
+    sb_x0 = x_max_lim - bar_real_m - 0.04 * world_w_m
+    sb_y0 = y_min_lim + 0.045 * world_h_m
+    sb_h = 0.012 * world_h_m
+    for seg_i in range(4):
+        seg_w = bar_real_m / 4.0
+        fc_seg = '#111111' if seg_i % 2 == 0 else '#FFFFFF'
+        rect = patches.Rectangle(
+            (sb_x0 + seg_i * seg_w, sb_y0), seg_w, sb_h,
+            linewidth=0.7, edgecolor='#111111', facecolor=fc_seg, zorder=8
+        )
+        ax.add_patch(rect)
+    ax.text(sb_x0, sb_y0 - 0.012 * world_h_m, "0", fontsize=6, ha='center', va='top', color='#111111')
+    ax.text(sb_x0 + bar_real_m / 2.0, sb_y0 - 0.012 * world_h_m, f"{bar_real_m/2:g} m", fontsize=6, ha='center', va='top', color='#111111')
+    ax.text(sb_x0 + bar_real_m, sb_y0 - 0.012 * world_h_m, f"{bar_real_m:g} m", fontsize=6, ha='center', va='top', color='#111111')
+    ax.text(sb_x0 + bar_real_m / 2.0, sb_y0 + sb_h + 0.008 * world_h_m, f"SKALA GRAFIS (1 : {scale_denom:,})", fontsize=6, fontweight='bold', ha='center', va='bottom', color='#111111')
+
+    img_buf = io.BytesIO()
+    fig.savefig(img_buf, format='png', dpi=300)
+    plt.close(fig)
+    img_buf.seek(0)
+
+    # 4. Susun Dokumen Word (.docx) A3 Landscape dengan Tabel Bingkai Utama + Etiket Kanan
+    doc = Document()
+    section = doc.sections[0]
+    section.orientation = WD_ORIENT.LANDSCAPE
+    section.page_width = Mm(page_w_mm)
+    section.page_height = Mm(page_h_mm)
+    section.left_margin = Mm(margin_left_mm)
+    section.right_margin = Mm(margin_other_mm)
+    section.top_margin = Mm(margin_other_mm)
+    section.bottom_margin = Mm(margin_other_mm)
+
+    # Hilangkan jarak paragraf bawaan agar tabel memenuhi halaman dengan presisi
+    normal_style = doc.styles['Normal']
+    normal_style.font.name = 'Arial'
+    normal_style.font.size = Pt(8)
+
+    # Helper XML untuk border dan padding sel tabel Word
+    def set_cell_borders(cell, top="12", bottom="12", left="12", right="12"):
+        tcPr = cell._tc.get_or_add_tcPr()
+        tcBorders = parse_xml(
+            f'<w:tcBorders {nsdecls("w")}>'
+            f'<w:top w:val="single" w:sz="{top}" w:space="0" w:color="000000"/>'
+            f'<w:bottom w:val="single" w:sz="{bottom}" w:space="0" w:color="000000"/>'
+            f'<w:left w:val="single" w:sz="{left}" w:space="0" w:color="000000"/>'
+            f'<w:right w:val="single" w:sz="{right}" w:space="0" w:color="000000"/>'
+            f'</w:tcBorders>'
+        )
+        tcPr.append(tcBorders)
+
+    def set_cell_margins(cell, top=40, bottom=40, left=80, right=80):
+        tcPr = cell._tc.get_or_add_tcPr()
+        tcMar = parse_xml(
+            f'<w:tcMar {nsdecls("w")}>'
+            f'<w:top w:w="{top}" w:type="dxa"/>'
+            f'<w:bottom w:w="{bottom}" w:type="dxa"/>'
+            f'<w:left w:w="{left}" w:type="dxa"/>'
+            f'<w:right w:w="{right}" w:type="dxa"/>'
+            f'</w:tcMar>'
+        )
+        tcPr.append(tcMar)
+
+    def set_cell_shading(cell, hex_color):
+        shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{hex_color}"/>')
+        cell._tc.get_or_add_tcPr().append(shading)
+
+    def write_cell_text(cell, text, size_pt=8, bold=False, align=WD_ALIGN_PARAGRAPH.LEFT, color_rgb=(0, 0, 0)):
+        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        p = cell.paragraphs[0]
+        p.alignment = align
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after = Pt(0)
+        p.paragraph_format.line_spacing = 1.05
+        run = p.add_run(text)
+        run.font.name = 'Arial'
+        run.font.size = Pt(size_pt)
+        run.font.bold = bold
+        run.font.color.rgb = RGBColor(*color_rgb)
+
+    # Tabel Induk Bingkai Gambar Kerja (1 Baris, 2 Kolom: Kiri = Area Gambar 300mm, Kanan = Etiket 90mm)
+    outer_tbl = doc.add_table(rows=1, cols=2)
+    outer_tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+    outer_tbl.autofit = False
+
+    row_outer = outer_tbl.rows[0]
+    trPr = row_outer._tr.get_or_add_trPr()
+    trPr.append(parse_xml(f'<w:trHeight {nsdecls("w")} w:val="{int(inner_h_mm * 56.7)}" w:hRule="exact"/>'))
+
+    cell_draw = row_outer.cells[0]
+    cell_etiket = row_outer.cells[1]
+    cell_draw.width = Mm(draw_box_w_mm)
+    cell_etiket.width = Mm(etiket_w_mm)
+
+    set_cell_borders(cell_draw, top="18", bottom="18", left="18", right="12")
+    set_cell_borders(cell_etiket, top="18", bottom="18", left="12", right="18")
+    set_cell_margins(cell_draw, top=20, bottom=20, left=20, right=20)
+    set_cell_margins(cell_etiket, top=0, bottom=0, left=0, right=0)
+
+    # Masukkan Gambar Denah Skalatis ke Kolom Kiri
+    cell_draw.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    p_img = cell_draw.paragraphs[0]
+    p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_img.paragraph_format.space_before = Pt(0)
+    p_img.paragraph_format.space_after = Pt(0)
+    run_img = p_img.add_run()
+    run_img.add_picture(img_buf, width=Mm(draw_box_w_mm - 2.0))
+
+    # Bangun Tabel Etiket (Title Block) di Kolom Kanan (Lebar Total = 90 mm)
+    # Menggunakan 3 sub-kolom: 34 mm, 28 mm, 28 mm
+    etiket_tbl = cell_etiket.add_table(rows=16, cols=3)
+    etiket_tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+    etiket_tbl.autofit = False
+    col_w_sub = [Mm(34.0), Mm(28.0), Mm(28.0)]
+    for row_e in etiket_tbl.rows:
+        for idx_c, w_c in enumerate(col_w_sub):
+            row_e.cells[idx_c].width = w_c
+            set_cell_borders(row_e.cells[idx_c], top="6", bottom="6", left="6", right="6")
+            set_cell_margins(row_e.cells[idx_c], top=35, bottom=35, left=60, right=60)
+
+    # Baris 0: Instansi / Kop
+    c0 = etiket_tbl.cell(0, 0).merge(etiket_tbl.cell(0, 2))
+    set_cell_shading(c0, "FCE4EC")
+    write_cell_text(c0, instansi.upper(), size_pt=9, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, color_rgb=(58, 0, 86))
+
+    # Baris 1: Judul Proyek
+    c1 = etiket_tbl.cell(1, 0).merge(etiket_tbl.cell(1, 2))
+    write_cell_text(c1, f"PROYEK:\n{nama_proyek.upper()}", size_pt=8.5, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+
+    # Baris 2: Judul Gambar
+    c2 = etiket_tbl.cell(2, 0).merge(etiket_tbl.cell(2, 2))
+    set_cell_shading(c2, "F3E5F5")
+    write_cell_text(
+        c2,
+        f"JUDUL GAMBAR:\nDENAH ALINYEMEN HORIZONTAL\n({r['jenis'].upper()})",
+        size_pt=8.5, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, color_rgb=(136, 14, 79)
+    )
+
+    # Baris 3: Standar Acuan
+    c3 = etiket_tbl.cell(3, 0).merge(etiket_tbl.cell(3, 2))
+    write_cell_text(c3, "STANDAR ACUAN: TPGJAK 1997 / BINA MARGA 2021", size_pt=7.5, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+
+    # Baris 4: Header Data Teknis Tikungan
+    c4 = etiket_tbl.cell(4, 0).merge(etiket_tbl.cell(4, 2))
+    set_cell_shading(c4, "E0E0E0")
+    write_cell_text(c4, "DATA PARAMETER GEOMETRIK TIKUNGAN", size_pt=8, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+
+    # Baris 5 - 11: Rincian Parameter Teknis
+    a_lbl, b_lbl = ("TC", "CT") if fc else ("TS", "ST")
+    param_rows = [
+        ("Kecepatan Rencana (Vr)", f"{r['V']:.0f} km/jam", f"Arah: {arah}"),
+        ("Sudut Tikungan (Δ)", f"{r['delta']:.2f}°", f"Lebar B: {B:.1f} m"),
+        ("Jari-Jari Rencana (Rc)", f"{r['Rc']:.2f} m", f"Rmin: {r['Rmin']:.2f} m"),
+        ("Superelevasi (e / emax)", f"{r['e']*100:.2f}% / {r['emax']*100:.1f}%", f"en: {r['en']*100:.1f}%"),
+        ("Panjang Spiral (Ls)", f"{r['Ls_sup']:.2f} m", f"Lc: {r['Lc']:.2f} m"),
+        ("Tangen (T) & Eksternal (E)", f"T = {r['T']:.2f} m", f"E = {r['E']:.2f} m"),
+        ("Panjang Total (Ltot)", f"{r['Ltot']:.2f} m", f"V_aman: {r['v_safe']:.1f} km/j"),
+        (f"STA {a_lbl} / STA PI", f"{a_lbl}: {sta_str(r['sta_awal'])}", f"PI: {sta_str(r['sta_pi'])}"),
+        (f"STA {b_lbl} (Akhir)", f"{b_lbl}: {sta_str(r['sta_akhir'])}", "Satuan: Meter"),
+    ]
+    for idx_p, (p_name, p_v1, p_v2) in enumerate(param_rows, start=5):
+        write_cell_text(etiket_tbl.cell(idx_p, 0), p_name, size_pt=7.2, bold=True)
+        write_cell_text(etiket_tbl.cell(idx_p, 1), p_v1, size_pt=7.2, bold=False)
+        write_cell_text(etiket_tbl.cell(idx_p, 2), p_v2, size_pt=7.2, bold=False)
+
+    # Baris 14: Pengesahan (Digambar & Diperiksa)
+    write_cell_text(etiket_tbl.cell(14, 0), f"DIGAMBAR OLEH:\n\n{digambar_oleh}", size_pt=7.2, bold=False, align=WD_ALIGN_PARAGRAPH.CENTER)
+    c14_r = etiket_tbl.cell(14, 1).merge(etiket_tbl.cell(14, 2))
+    write_cell_text(c14_r, f"DIPERIKSA / DISETUJUI:\n\n{diperiksa_oleh}", size_pt=7.2, bold=False, align=WD_ALIGN_PARAGRAPH.CENTER)
+
+    # Baris 15: Skala Gambar & Nomor Lembar
+    set_cell_shading(etiket_tbl.cell(15, 0), "FFF9C4")
+    write_cell_text(etiket_tbl.cell(15, 0), f"SKALA:\n1 : {scale_denom:,}", size_pt=8.5, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+    write_cell_text(etiket_tbl.cell(15, 1), "UKURAN KERTAS:\nA3 LANDSCAPE", size_pt=7.5, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+    set_cell_shading(etiket_tbl.cell(15, 2), "FCE4EC")
+    write_cell_text(etiket_tbl.cell(15, 2), f"NO. GAMBAR:\n{no_gambar}", size_pt=8.5, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, color_rgb=(136, 14, 79))
+
+    doc_buf = io.BytesIO()
+    doc.save(doc_buf)
+    return doc_buf.getvalue(), scale_denom
+
+
 def generate_excel_bm2021(r, pvi_data):
     wb = openpyxl.Workbook()
     
@@ -396,6 +798,7 @@ def generate_excel_bm2021(r, pvi_data):
     for col_l, w in col_widths.items():
         ws1.column_dimensions[col_l].width = w
 
+    # Header Judul
     ws1.merge_cells("A1:I1")
     ws1["A1"] = f"PERHITUNGAN TIKUNGAN 1 ({r['jenis'].upper()})"
     ws1["A1"].font = font_title
@@ -404,6 +807,7 @@ def generate_excel_bm2021(r, pvi_data):
     ws1.row_dimensions[1].height = 26
     apply_border_range(ws1, "A1:I1", border_box)
 
+    # Tabel Data Input Awal (Baris 2 - 9)
     inputs_h = [
         (2, "Kecepatan Rencana (Vr)", r["V"], '0.0" km/jam"', fill_yellow, "=D2/3.6", '0.0000" m/s"'),
         (3, "Superelevasi maksimum (e_max)", r["emax"], "0.0%", fill_yellow, "=D3", "0.000"),
@@ -439,6 +843,7 @@ def generate_excel_bm2021(r, pvi_data):
         apply_border_range(ws1, f"A{row_idx}:I{row_idx}", border_cell)
 
     def add_step_block(ws, start_r, step_no, title_txt, rows_spec):
+        """Helper untuk membuat blok langkah bernomor seperti pada gambar referensi."""
         end_r = start_r + len(rows_spec)
         ws.merge_cells(start_row=start_r, start_column=1, end_row=end_r, end_column=1)
         c_no = ws.cell(row=start_r, column=1, value=step_no)
@@ -682,224 +1087,43 @@ def generate_excel_bm2021(r, pvi_data):
     wb.save(buf)
     return buf.getvalue()
 
-
-def export_dxf_full_autocad(x_h, y_h, s_v, r_dict, B_w, nx_v, ny_v, sg_val):
-    """Membuat file AutoCAD R2010 (.DXF) yang berisi:
-    1. Gambar Detail Denah Tikungan (2D)
-    2. Diagram Superelevasi (Rotasi pada Sumbu Jalan)
-    """
-    doc = ezdxf.new("R2010")
-    msp = doc.modelspace()
-
-    # Buat Layer Terstruktur dengan Warna Kontras
-    layers = [
-        ("AS_JALAN", 7),            # Putih/Hitam
-        ("TEPI_PERKERASAN", 8),     # Abu-abu
-        ("GARIS_TANGEN", 5),        # Biru
-        ("JARI_JARI", 3),           # Hijau
-        ("ANOTASI_STA", 1),         # Merah
-        ("SUPERELEVASI_LUAR", 1),   # Merah
-        ("SUPERELEVASI_DALAM", 5),  # Biru
+def export_dxf_full_autocad(x_h, y_h, z_e, s_v, r_dict, B_w, nx_v, ny_v):
+    lines = [
+        "0", "SECTION", "2", "HEADER", "0", "ENDSEC",
+        "0", "SECTION", "2", "TABLES",
+        "0", "TABLE", "2", "LAYER",
+        "0", "LAYER", "2", "AS_JALAN_3D", "70", "0", "62", "7", "6", "CONTINUOUS",
+        "0", "LAYER", "2", "TEPI_KIRI_3D", "70", "0", "62", "1", "6", "CONTINUOUS",
+        "0", "LAYER", "2", "TEPI_KANAN_3D", "70", "0", "62", "5", "6", "CONTINUOUS",
+        "0", "LAYER", "2", "DENAH_ANNOTATION", "70", "0", "62", "2", "6", "CONTINUOUS",
+        "0", "LAYER", "2", "PROFIL_VERTIKAL", "70", "0", "62", "3", "6", "CONTINUOUS",
+        "0", "ENDTAB", "0", "ENDSEC",
+        "0", "SECTION", "2", "ENTITIES"
     ]
-    for name, color in layers:
-        if name not in doc.layers:
-            doc.layers.add(name, color=color)
+    lines.extend(["0", "POLYLINE", "8", "AS_JALAN_3D", "66", "1", "70", "8"])
+    for x, y, z in zip(x_h, y_h, z_e):
+        lines.extend(["0", "VERTEX", "8", "AS_JALAN_3D", "10", f"{float(x):.3f}", "20", f"{float(y):.3f}", "30", f"{float(z):.3f}"])
+    lines.extend(["0", "SEQEND"])
 
-    # =========================================================================
-    # BAGIAN 1: GAMBAR DETAIL DENAH TIKUNGAN (2D)
-    # =========================================================================
-    xl = x_h + (B_w / 2.0) * nx_v
-    yl = y_h + (B_w / 2.0) * ny_v
-    xr = x_h - (B_w / 2.0) * nx_v
-    yr = y_h - (B_w / 2.0) * ny_v
+    xl, yl = x_h + (B_w / 2) * nx_v, y_h + (B_w / 2) * ny_v
+    xr, yr = x_h - (B_w / 2) * nx_v, y_h - (B_w / 2) * ny_v
+    lines.extend(["0", "POLYLINE", "8", "TEPI_KIRI_3D", "66", "1", "70", "8"])
+    for x, y, z in zip(xl, yl, z_e):
+        lines.extend(["0", "VERTEX", "8", "TEPI_KIRI_3D", "10", f"{float(x):.3f}", "20", f"{float(y):.3f}", "30", f"{float(z):.3f}"])
+    lines.extend(["0", "SEQEND"])
 
-    msp.add_lwpolyline(list(zip(x_h, y_h)), dxfattribs={"layer": "AS_JALAN"})
-    msp.add_lwpolyline(list(zip(xl, yl)), dxfattribs={"layer": "TEPI_PERKERASAN"})
-    msp.add_lwpolyline(list(zip(xr, yr)), dxfattribs={"layer": "TEPI_PERKERASAN"})
+    lines.extend(["0", "POLYLINE", "8", "TEPI_KANAN_3D", "66", "1", "70", "8"])
+    for idx_pt, (x, z) in enumerate(zip(xr, z_e)):
+        lines.extend(["0", "VERTEX", "8", "TEPI_KANAN_3D", "10", f"{float(x):.3f}", "20", f"{float(yr[idx_pt]):.3f}", "30", f"{float(z):.3f}"])
+    lines.extend(["0", "SEQEND"])
 
-    # Garis Singgung Tangen & Titik PI
-    idx_start = int(np.argmin(np.abs(s_v - 0.0)))
-    idx_end = int(np.argmin(np.abs(s_v - r_dict["Ltot"])))
-    dx_in = x_h[idx_start + 1] - x_h[idx_start]
-    dy_in = y_h[idx_start + 1] - y_h[idx_start]
-    ang_in = math.atan2(dy_in, dx_in)
-    x_pi = x_h[idx_start] + r_dict["T"] * math.cos(ang_in)
-    y_pi = y_h[idx_start] + r_dict["T"] * math.sin(ang_in)
-
-    msp.add_lwpolyline(
-        [(float(x_h[idx_start]), float(y_h[idx_start])), (float(x_pi), float(y_pi)), (float(x_h[idx_end]), float(y_h[idx_end]))],
-        dxfattribs={"layer": "GARIS_TANGEN"}
-    )
-    msp.add_circle((float(x_pi), float(y_pi)), radius=1.2, dxfattribs={"layer": "ANOTASI_STA"})
-    msp.add_text(
-        f"PI | Delta={r_dict['delta']:.1f} deg | STA {sta_str(r_dict['sta_pi'])}",
-        dxfattribs={"layer": "ANOTASI_STA", "height": 2.5}
-    ).set_placement((float(x_pi) + 2.5, float(y_pi) + 2.5))
-
-    # Pusat Lingkaran (O) & Garis Jari-Jari Rc
-    mid_idx = idx_start if r_dict["jenis"].startswith("Full") else int(np.argmin(np.abs(s_v - (r_dict["Ltot"] / 2.0))))
-    x_center = float(x_h[mid_idx] + sg_val * r_dict["Rc"] * nx_v[mid_idx])
-    y_center = float(y_h[mid_idx] + sg_val * r_dict["Rc"] * ny_v[mid_idx])
-
-    msp.add_line((float(x_h[mid_idx]), float(y_h[mid_idx])), (x_center, y_center), dxfattribs={"layer": "JARI_JARI"})
-    msp.add_circle((x_center, y_center), radius=1.5, dxfattribs={"layer": "JARI_JARI"})
-    msp.add_text(
-        f"O (Rc = {r_dict['Rc']:.1f} m)",
-        dxfattribs={"layer": "JARI_JARI", "height": 2.5}
-    ).set_placement((x_center + 2.5, y_center))
-
-    # Patok Stasioning setiap 50 m
-    sta_min_plot = math.ceil((r_dict["sta_awal"] + s_v[0]) / 50.0) * 50.0
-    sta_max_plot = math.floor((r_dict["sta_awal"] + s_v[-1]) / 50.0) * 50.0
-    tick_half = max(B_w * 0.85, 5.5)
-    for st_val in np.arange(sta_min_plot, sta_max_plot + 1, 50.0):
-        s_rel = st_val - r_dict["sta_awal"]
-        if s_v[0] <= s_rel <= s_v[-1]:
-            idx_t = int(np.argmin(np.abs(s_v - s_rel)))
-            xt0, yt0 = float(x_h[idx_t]), float(y_h[idx_t])
-            nxt, nyt = float(nx_v[idx_t]), float(ny_v[idx_t])
-            msp.add_line(
-                (xt0 - tick_half * nxt, yt0 - tick_half * nyt),
-                (xt0 + tick_half * nxt, yt0 + tick_half * nyt),
-                dxfattribs={"layer": "TEPI_PERKERASAN"}
-            )
-            lbl_side = -sg_val
-            msp.add_text(
-                sta_str(st_val, d=0),
-                dxfattribs={"layer": "TEPI_PERKERASAN", "height": 1.6}
-            ).set_placement((xt0 + lbl_side * (tick_half + 2.5) * nxt, yt0 + lbl_side * (tick_half + 2.5) * nyt))
-
-    # Titik Utama Tikungan (TS/SC/CS/ST atau TC/CT)
-    pts_info = []
-    if r_dict["jenis"].startswith("Full"):
-        pts_info = [
-            (idx_start, f"TC {sta_str(r_dict['sta_awal'])}"),
-            (idx_end, f"CT {sta_str(r_dict['sta_akhir'])}")
-        ]
-    else:
-        pts_info = [
-            (idx_start, f"TS {sta_str(r_dict['sta_awal'])}"),
-            (idx_end, f"ST {sta_str(r_dict['sta_akhir'])}")
-        ]
-        if r_dict["jenis"].startswith("Spiral-Spiral"):
-            idx_m = int(np.argmin(np.abs(s_v - r_dict["Ls"])))
-            pts_info.append((idx_m, f"SC=CS {sta_str(r_dict['sta_awal'] + r_dict['Ls'])}"))
-        else:
-            idx_sc = int(np.argmin(np.abs(s_v - r_dict["Ls"])))
-            idx_cs = int(np.argmin(np.abs(s_v - (r_dict["Ls"] + r_dict["Lc"]))))
-            pts_info.append((idx_sc, f"SC {sta_str(r_dict['sta_awal'] + r_dict['Ls'])}"))
-            pts_info.append((idx_cs, f"CS {sta_str(r_dict['sta_awal'] + r_dict['Ls'] + r_dict['Lc'])}"))
-
-    for idx_p, lbl_p in pts_info:
-        px, py = float(x_h[idx_p]), float(y_h[idx_p])
-        msp.add_circle((px, py), radius=1.0, dxfattribs={"layer": "ANOTASI_STA"})
-        msp.add_text(lbl_p, dxfattribs={"layer": "ANOTASI_STA", "height": 2.2}).set_placement((px + 1.5, py - 4.0))
-
-    msp.add_text(
-        f"1. DENAH TRASE TIKUNGAN - {r_dict['jenis'].upper()}",
-        dxfattribs={"layer": "AS_JALAN", "height": 4.0}
-    ).set_placement((float(np.min(x_h)), float(np.max(y_h)) + 15.0))
-
-    # =========================================================================
-    # BAGIAN 2: DIAGRAM SUPERELEVASI (DILETAKKAN DI BAWAH DENAH)
-    # =========================================================================
-    e_desain = r_dict["e"] * 100.0
-    en_val = r_dict["en"] * 100.0
-    ls_val = r_dict["Ls_sup"]
-    ltot_val = r_dict["Ltot"]
-    sta_0 = r_dict["sta_awal"]
-
-    if r_dict["jenis"].startswith("Full"):
-        s_start_trans = -(2.0 / 3.0) * ls_val
-        s_full_start = (1.0 / 3.0) * ls_val
-        s_full_end = ltot_val - (1.0 / 3.0) * ls_val
-        s_end_trans = ltot_val + (2.0 / 3.0) * ls_val
-        krit_s = [s_start_trans, 0.0, s_full_start, s_full_end, ltot_val, s_end_trans]
-        krit_lbl = ["Awal Transisi", "TC", "e penuh", "e penuh", "CT", "Akhir Transisi"]
-    else:
-        s_start_trans = 0.0
-        s_full_start = ls_val
-        s_full_end = ltot_val - ls_val
-        s_end_trans = ltot_val
-        if r_dict["jenis"].startswith("Spiral-Spiral"):
-            krit_s = [0.0, ls_val, ltot_val]
-            krit_lbl = ["TS", "SC=CS", "ST"]
-        else:
-            krit_s = [0.0, ls_val, ltot_val - ls_val, ltot_val]
-            krit_lbl = ["TS", "SC", "CS", "ST"]
-
-    trans_len = max(s_full_start - s_start_trans, 1e-6)
-    margin_s = max(40.0, 0.25 * ltot_val)
-    s_min_sup = min(0.0, s_start_trans) - margin_s
-    s_max_sup = max(ltot_val, s_end_trans) + margin_s
-
-    s_zero_1 = s_start_trans + trans_len * (en_val / (e_desain + en_val))
-    s_zero_2 = s_end_trans - trans_len * (en_val / (e_desain + en_val))
-    s_crown_1 = s_start_trans + trans_len * ((2 * en_val) / (e_desain + en_val))
-    s_crown_2 = s_end_trans - trans_len * ((2 * en_val) / (e_desain + en_val))
-
-    key_nodes = np.unique(np.sort([
-        s_min_sup, s_start_trans, s_zero_1, s_crown_1,
-        s_full_start, s_full_end, s_crown_2, s_zero_2, s_end_trans, s_max_sup
-    ]))
-
-    e_luar = np.zeros_like(key_nodes)
-    e_dalam = np.zeros_like(key_nodes)
-    for i, sv in enumerate(key_nodes):
-        if sv <= s_start_trans or sv >= s_end_trans:
-            e_luar[i] = -en_val
-            e_dalam[i] = -en_val
-        elif s_start_trans < sv < s_full_start:
-            frac = (sv - s_start_trans) / trans_len
-            e_luar[i] = -en_val + frac * (e_desain + en_val)
-            e_dalam[i] = min(-en_val, -e_luar[i])
-        elif s_full_start <= sv <= s_full_end:
-            e_luar[i] = e_desain
-            e_dalam[i] = -e_desain
-        elif s_full_end < sv < s_end_trans:
-            frac = (s_end_trans - sv) / trans_len
-            e_luar[i] = -en_val + frac * (e_desain + en_val)
-            e_dalam[i] = min(-en_val, -e_luar[i])
-
-    # Posisikan Diagram Superelevasi rapi di bawah denah
-    x_base_sup = float(np.min(x_h))
-    y_base_sup = float(np.min(y_h)) - 90.0
-    v_scale = 3.0  # Skala vertikal 1% = 3 meter di gambar CAD agar proporsional
-
-    x_sup_pts = [x_base_sup + float(sv - s_min_sup) for sv in key_nodes]
-    y_luar_pts = [y_base_sup + float(ev) * v_scale for ev in e_luar]
-    y_dalam_pts = [y_base_sup + float(ev) * v_scale for ev in e_dalam]
-
-    # Garis Sumbu 0%
-    msp.add_line((x_sup_pts[0], y_base_sup), (x_sup_pts[-1], y_base_sup), dxfattribs={"layer": "AS_JALAN"})
-    # Kurva Tepi Luar (+e) & Tepi Dalam (-e)
-    msp.add_lwpolyline(list(zip(x_sup_pts, y_luar_pts)), dxfattribs={"layer": "SUPERELEVASI_LUAR"})
-    msp.add_lwpolyline(list(zip(x_sup_pts, y_dalam_pts)), dxfattribs={"layer": "SUPERELEVASI_DALAM"})
-
-    # Garis Vertikal & Anotasi Titik Kritis Superelevasi
-    y_line_top = y_base_sup + (e_desain + 3.0) * v_scale
-    y_line_bot = y_base_sup - (e_desain + 3.0) * v_scale
-    for ks, klbl in zip(krit_s, krit_lbl):
-        xk = x_base_sup + float(ks - s_min_sup)
-        msp.add_line((xk, y_line_bot), (xk, y_line_top), dxfattribs={"layer": "TEPI_PERKERASAN"})
-        msp.add_text(
-            f"{klbl} ({sta_str(sta_0 + ks)})",
-            dxfattribs={"layer": "ANOTASI_STA", "height": 1.8}
-        ).set_placement((xk + 0.8, y_line_top + 1.5))
-
-    mid_x_sup = x_base_sup + float(((s_full_start + s_full_end) / 2.0) - s_min_sup)
-    msp.add_text(f"+e = +{e_desain:.2f}%", dxfattribs={"layer": "SUPERELEVASI_LUAR", "height": 2.2}).set_placement((mid_x_sup, y_base_sup + e_desain * v_scale + 2.0))
-    msp.add_text(f"-e = -{e_desain:.2f}%", dxfattribs={"layer": "SUPERELEVASI_DALAM", "height": 2.2}).set_placement((mid_x_sup, y_base_sup - e_desain * v_scale - 4.0))
-    msp.add_text(f"en = -{en_val:.1f}%", dxfattribs={"layer": "AS_JALAN", "height": 2.0}).set_placement((x_sup_pts[0] + 2.0, y_base_sup - en_val * v_scale - 3.5))
-    msp.add_text(
-        "2. DIAGRAM SUPERELEVASI (ROTASI PADA SUMBU JALAN)",
-        dxfattribs={"layer": "AS_JALAN", "height": 4.0}
-    ).set_placement((x_base_sup, y_line_top + 10.0))
-
-    stream = io.StringIO()
-    doc.write(stream)
-    return stream.getvalue().encode("utf-8")
-
+    y_off = -150.0
+    lines.extend(["0", "POLYLINE", "8", "PROFIL_VERTIKAL", "66", "1", "70", "0"])
+    for s, z in zip(s_v, z_e):
+        lines.extend(["0", "VERTEX", "8", "PROFIL_VERTIKAL", "10", f"{float(s):.3f}", "20", f"{y_off + float(z):.3f}", "30", "0.0"])
+    lines.extend(["0", "SEQEND"])
+    lines.extend(["0", "ENDSEC", "0", "EOF"])
+    return "\n".join(lines)
 
 # ----------------------------------------------------------------------------
 # 5. TAMPILAN APLIKASI UTAMA
@@ -915,13 +1139,14 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 # ----------------------------------------------------------------------------
-# TAB 1: DENAH TIKUNGAN 2D
+# TAB 1: DENAH TIKUNGAN 2D + EKSPOR GAMBAR KERJA WORD LANDSCAPE SKALATIS
 # ----------------------------------------------------------------------------
 with tab1:
     st.markdown("<h3 style='color: #3A0056;'>📍 Visualisasi Denah Trase Tikungan 2D</h3>", unsafe_allow_html=True)
     
     fig_2d = go.Figure()
     
+    # 1. Badan Jalan (Arsiran Abu-abu Lembut) + Tepi Kiri & Kanan
     xl, yl = x_horiz + (B / 2) * nx, y_horiz + (B / 2) * ny
     xr, yr = x_horiz - (B / 2) * nx, y_horiz - (B / 2) * ny
     
@@ -936,8 +1161,11 @@ with tab1:
     ))
     fig_2d.add_trace(go.Scatter(x=xl, y=yl, mode='lines', name='Tepi Perkerasan', line=dict(color='#616161', width=1.5)))
     fig_2d.add_trace(go.Scatter(x=xr, y=yr, mode='lines', showlegend=False, line=dict(color='#616161', width=1.5)))
+    
+    # 2. As Jalan (Hitam Pekat & Jelas)
     fig_2d.add_trace(go.Scatter(x=x_horiz, y=y_horiz, mode='lines', name='As jalan', line=dict(color='#111111', width=3)))
     
+    # 3. Garis Singgung Tangen (Biru Putus-putus) & Titik PI (Kotak Hitam)
     idx_start = np.argmin(np.abs(s_vals - 0))
     idx_end = np.argmin(np.abs(s_vals - r["Ltot"]))
     
@@ -973,6 +1201,7 @@ with tab1:
         bordercolor="#BDBDBD", borderwidth=1, borderpad=4
     )
     
+    # 4. Titik Pusat Lingkaran (O) & Garis Jari-jari Hijau Putus-putus
     if r["jenis"].startswith("Full"):
         mid_idx = idx_start
     else:
@@ -1004,6 +1233,7 @@ with tab1:
         borderpad=2
     )
     
+    # 5. Garis Patok Stasioning Minor setiap 50 m (0+050, 0+100, dst.)
     sta_min_plot = math.ceil((r["sta_awal"] + s_vals[0]) / 50.0) * 50.0
     sta_max_plot = math.floor((r["sta_awal"] + s_vals[-1]) / 50.0) * 50.0
     tick_stas = np.arange(sta_min_plot, sta_max_plot + 1, 50.0)
@@ -1035,6 +1265,7 @@ with tab1:
                 borderpad=1
             )
 
+    # 6. Titik-Titik Utama Tikungan (Merah Bulat + Label Merah Tua Berlatar Putih)
     fc = r["jenis"].startswith("Full")
     is_ss = r["jenis"].startswith("Spiral-Spiral")
     
@@ -1109,8 +1340,39 @@ with tab1:
     )
     st.plotly_chart(fig_2d, use_container_width=True)
 
+    # Panel Pengaturan Etiket & Unduh Gambar Kerja Word (.DOCX) Landscape Skalatis
+    st.markdown("---")
+    st.markdown("<h4 style='color: #3A0056;'>📄 Ekspor Gambar Kerja Skalatis ke Microsoft Word (.DOCX) — A3 Landscape + Etiket Kanan</h4>", unsafe_allow_html=True)
+    with st.expander("✏️ Atur Keterangan Etiket Gambar (Title Block)", expanded=True):
+        c_et1, c_et2, c_et3 = st.columns(3)
+        with c_et1:
+            et_instansi = st.text_input("Nama Instansi / Kampus", "LABORATORIUM REKAYASA JALAN RAYA")
+            et_proyek = st.text_input("Judul Proyek / Tugas", "PERENCANAAN GEOMETRIK JALAN RAYA")
+        with c_et2:
+            et_digambar = st.text_input("Digambar Oleh", "Perencana Geometrik")
+            et_diperiksa = st.text_input("Diperiksa / Disetujui Oleh", "Dosen / Engineer")
+        with c_et3:
+            et_nogambar = st.text_input("Nomor Lembar Gambar", "GMJ-01")
+
+    docx_bytes, skala_terpilih = generate_word_drawing_landscape(
+        x_horiz, y_horiz, s_vals, ths_, nx, ny, r, B, arah,
+        nama_proyek=et_proyek,
+        instansi=et_instansi,
+        digambar_oleh=et_digambar,
+        diperiksa_oleh=et_diperiksa,
+        no_gambar=et_nogambar
+    )
+    st.caption(f"📐 **Info Skala Otomatis:** Gambar dirender skalatis pada kertas **A3 Landscape (420 × 297 mm)** dengan **Skala 1 : {skala_terpilih:,}** beserta Batang Skala Grafis dan Etiket Kanan.")
+    st.download_button(
+        f"📥 Unduh Gambar Kerja Skalatis Word (.DOCX) — Skala 1 : {skala_terpilih:,}",
+        docx_bytes,
+        file_name=f"Gambar_Kerja_Tikungan_Skala_1_{skala_terpilih}.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        use_container_width=True
+    )
+
 # ----------------------------------------------------------------------------
-# TAB 2: DIAGRAM SUPERELEVASI
+# TAB 2: DIAGRAM SUPERELEVASI (DETAIL ROTASI PADA SUMBU JALAN)
 # ----------------------------------------------------------------------------
 with tab2:
     st.markdown("<h3 style='color: #3A0056;'>📈 Diagram Superelevasi (Rotasi pada Sumbu Jalan)</h3>", unsafe_allow_html=True)
@@ -1295,7 +1557,7 @@ with tab2:
     st.plotly_chart(fig_sup, use_container_width=True)
 
 # ----------------------------------------------------------------------------
-# TAB 3: SIMULASI 3D MOBIL JALAN
+# TAB 3: PROFIL MEMANJANG & SIMULASI 3D (SMOOTH PLOTLY ANIMATION)
 # ----------------------------------------------------------------------------
 with tab3:
     st.markdown("<h3 style='color: #3A0056;'>🚘 Visualisasi 3D Jalan & Simulator Mobil Jalan Otomatis</h3>", unsafe_allow_html=True)
@@ -1497,9 +1759,9 @@ with tab4:
         )
         st.plotly_chart(fig_prof, use_container_width=True)
 
-    dxf_out = export_dxf_full_autocad(x_horiz, y_horiz, s_vals, r, B, nx, ny, sg)
+    dxf_out = export_dxf_full_autocad(x_horiz, y_horiz, z_elev, s_vals, r, B, nx, ny)
     st.download_button(
-        "📐 Unduh Hasil Gambar AutoCAD (.DXF — Tikungan Detail & Diagram Superelevasi)",
+        "📐 Unduh Gambar AutoCAD / Civil 3D (.DXF Multi-Layer)",
         dxf_out, file_name="Geometri_Jalan_BinaMarga.dxf", mime="application/dxf",
         use_container_width=True
     )

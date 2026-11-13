@@ -7,6 +7,7 @@ import streamlit as st
 import plotly.graph_objects as go
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Border, Side
+import ezdxf
 
 # ----------------------------------------------------------------------------
 # KONFIGURASI HALAMAN STREAMLIT & TEMA
@@ -361,7 +362,7 @@ else:
     z_elev = np.zeros_like(s_vals)
 
 # ----------------------------------------------------------------------------
-# 4. EXPORT ENGINE (CAD DXF & EXCEL BM 2021 - FORMAT LEMBAR HITUNGAN BERTAHAP)
+# 4. EXPORT ENGINE (CAD DXF R2010 LWPOLYLINE & EXCEL BM 2021)
 # ----------------------------------------------------------------------------
 def generate_excel_bm2021(r, pvi_data):
     wb = openpyxl.Workbook()
@@ -395,7 +396,6 @@ def generate_excel_bm2021(r, pvi_data):
     for col_l, w in col_widths.items():
         ws1.column_dimensions[col_l].width = w
 
-    # Header Judul
     ws1.merge_cells("A1:I1")
     ws1["A1"] = f"PERHITUNGAN TIKUNGAN 1 ({r['jenis'].upper()})"
     ws1["A1"].font = font_title
@@ -404,7 +404,6 @@ def generate_excel_bm2021(r, pvi_data):
     ws1.row_dimensions[1].height = 26
     apply_border_range(ws1, "A1:I1", border_box)
 
-    # Tabel Data Input Awal (Baris 2 - 9)
     inputs_h = [
         (2, "Kecepatan Rencana (Vr)", r["V"], '0.0" km/jam"', fill_yellow, "=D2/3.6", '0.0000" m/s"'),
         (3, "Superelevasi maksimum (e_max)", r["emax"], "0.0%", fill_yellow, "=D3", "0.000"),
@@ -440,7 +439,6 @@ def generate_excel_bm2021(r, pvi_data):
         apply_border_range(ws1, f"A{row_idx}:I{row_idx}", border_cell)
 
     def add_step_block(ws, start_r, step_no, title_txt, rows_spec):
-        """Helper untuk membuat blok langkah bernomor seperti pada gambar referensi."""
         end_r = start_r + len(rows_spec)
         ws.merge_cells(start_row=start_r, start_column=1, end_row=end_r, end_column=1)
         c_no = ws.cell(row=start_r, column=1, value=step_no)
@@ -490,25 +488,20 @@ def generate_excel_bm2021(r, pvi_data):
         return end_r + 1
 
     curr = 10
-    # Step 1: FMAX -> H11
     curr = add_step_block(ws1, curr, 1, "FMAX (Koefisien Gesek Melintang Maksimum)", [
         (False, "f_max = -0.00065·Vr + 0.192 (Vr < 80) atau -0.00125·Vr + 0.24", "=IF(D2<80, -0.00065*D2+0.192, -0.00125*D2+0.24)", "0.0000", False)
     ])
-    # Step 2: Rmin -> H13
     curr = add_step_block(ws1, curr, 2, "MENGHITUNG Rmin", [
         (False, "Rmin = Vr² / (127 × (e_max + f_max))", "=D2^2/(127*(H3+H11))", '0.0000" m"', False)
     ])
-    # Step 3: R rencana -> H15
     curr = add_step_block(ws1, curr, 3, "MENENTUKAN JARI-JARI RENCANA (Rc)", [
         (False, "Rc rencana ≥ Rmin, diambil Rc rencana", r["Rc"], '0.00" m"', True)
     ])
-    # Step 4: Superelevasi desain (e) -> Dmax=H17, D=H18, e=H19
     curr = add_step_block(ws1, curr, 4, "MENGHITUNG SUPERELEVASI DESAIN (e)", [
         (False, "Dmax = 181913.53 × (e_max + f_max) / Vr²", "=181913.53*(H3+H11)/(D2^2)", "0.0000", False),
         (False, "D = 1432.39 / Rc", "=1432.39/H15", "0.0000", False),
         (False, "e = MAX(en, -e_max·(D/Dmax)² + 2·e_max·(D/Dmax))", "=MAX(H7, -H3*(H18/H17)^2 + 2*H3*(H18/H17))", "0.00%", False),
     ])
-    # Step 5: Ls min -> H22, H24, H26
     curr = add_step_block(ws1, curr, 5, "MENGHITUNG Ls min (Lengkung Peralihan Minimum)", [
         (True, "Berdasarkan waktu tempuh maksimum lengkung peralihan (3 detik)", None, None, False),
         (False, "Ls = (Vr / 3.6) × T", "=(D2/3.6)*D5", "0.0000", False),
@@ -517,51 +510,39 @@ def generate_excel_bm2021(r, pvi_data):
         (True, "Berdasarkan tingkat pencapaian perubahan kelandaian", None, None, False),
         (False, "Ls = ((e + en) × Vr) / (3.6 × re)", "=((H19+H7)*D2)/(3.6*H9)", "0.0000", False),
     ])
-    # Step 6: Ls rencana -> H28
     curr = add_step_block(ws1, curr, 6, "MENENTUKAN Ls RENCANA (Dibulatkan kelipatan 5 m)", [
         (False, "Ls rencana ≥ MAX(Ls1, Ls2, Ls3), diambil Ls rencana", "=CEILING(MAX(H22,H24,H26), 5)", '0.00" m"', True)
     ])
-    # Step 7: Theta_s -> H30
     curr = add_step_block(ws1, curr, 7, "Menghitung θs (deflection angle tiap spiral)", [
         (False, "θs = (Ls × 90) / (π × Rc)", "=(H28*90)/(PI()*H15)", '0.0000"°"', False)
     ])
-    # Step 8: Theta_c -> H32
     curr = add_step_block(ws1, curr, 8, "Menghitung θc (sudut lingkaran / central angle busur)", [
         (False, "θc = Δ - 2·θs", "=IF(H28=0, D4, D4-2*H30)", '0.0000"°"', False)
     ])
-    # Step 9: Lc -> H34
     curr = add_step_block(ws1, curr, 9, "Menghitung Panjang Busur Lingkaran (Lc)", [
         (False, "Lc = (θc / 360) × 2π·Rc", "=(H32/360)*2*PI()*H15", '0.0000" m"', False)
     ])
-    # Step 10: Ltotal -> H36
     curr = add_step_block(ws1, curr, 10, "Menentukan L total", [
         (False, "Ltotal = Lc + 2·Ls", "=H34+2*H28", '0.0000" m"', False)
     ])
-    # Step 11: Xs -> H38
     curr = add_step_block(ws1, curr, 11, "Menentukan Xs", [
         (False, "Xs = Ls × (1 - Ls² / (40·Rc²))", "=H28*(1-(H28^2)/(40*(H15^2)))", '0.0000" m"', False)
     ])
-    # Step 12: Ys -> H40
     curr = add_step_block(ws1, curr, 12, "Menentukan Ys", [
         (False, "Ys = Ls² / (6·Rc)", "=(H28^2)/(6*H15)", '0.0000" m"', False)
     ])
-    # Step 13: P -> H42
     curr = add_step_block(ws1, curr, 13, "Menentukan P (Pergeseran Tangen)", [
         (False, "P = Ys - Rc × (1 - cos(θs))", "=H40-H15*(1-COS(RADIANS(H30)))", '0.0000" m"', False)
     ])
-    # Step 14: K -> H44
     curr = add_step_block(ws1, curr, 14, "Menentukan K", [
         (False, "K = Xs - Rc × sin(θs)", "=H38-H15*SIN(RADIANS(H30))", '0.0000" m"', False)
     ])
-    # Step 15: Es -> H46
     curr = add_step_block(ws1, curr, 15, "Menentukan Es (Jarak Eksternal)", [
         (False, "Es = (Rc + P) / cos(Δ/2) - Rc", "=(H15+H42)/COS(RADIANS(D4/2))-H15", '0.0000" m"', False)
     ])
-    # Step 16: Ts -> H48
     curr = add_step_block(ws1, curr, 16, "Menentukan Ts (Panjang Tangen)", [
         (False, "Ts = (Rc + P) × tan(Δ/2) + K", "=(H15+H42)*TAN(RADIANS(D4/2))+H44", '0.0000" m"', False)
     ])
-    # Step 17: Stasioning & V_aman -> H50, H51, H52, H53
     curr = add_step_block(ws1, curr, 17, "Kontrol Kecepatan Aman & Stasioning", [
         (False, "V_aman = √(127 × Rc × (e + f_max))", "=SQRT(127*H15*(H19+H11))", '0.00" km/jam"', False),
         (False, "STA PI (Input Desain)", r["sta_pi"], '0.00" m"', True),
@@ -570,7 +551,7 @@ def generate_excel_bm2021(r, pvi_data):
     ])
 
     # =========================================================================
-    # SHEET 2: PERHITUNGAN ALINYEMEN VERTIKAL (FORMAT LANGKAH DEMI LANGKAH)
+    # SHEET 2: PERHITUNGAN ALINYEMEN VERTIKAL
     # =========================================================================
     ws2 = wb.create_sheet(title="Alinyemen Vertikal")
     for col_l, w in col_widths.items():
@@ -584,7 +565,6 @@ def generate_excel_bm2021(r, pvi_data):
     ws2.row_dimensions[1].height = 26
     apply_border_range(ws2, "A1:I1", border_box)
 
-    # Parameter Dasar Alinyemen Vertikal (Baris 2 - 5)
     inputs_v = [
         (2, "Kecepatan Rencana (Vr)", r["V"], '0.0" km/jam"', fill_yellow, "=D2/3.6", '0.0000" m/s"'),
         (3, "Waktu Reaksi Pengemudi (t)", 2.5, '0.0" s"', fill_grey, "=D3", '0.0" s"'),
@@ -615,7 +595,6 @@ def generate_excel_bm2021(r, pvi_data):
         c_res.number_format = fmt_h
         apply_border_range(ws2, f"A{row_idx}:I{row_idx}", border_cell)
 
-    # Loop untuk setiap PVI yang memiliki lengkung vertikal
     curr_v = 7
     if pvi_data is not None and len(pvi_data["kurva"]) > 0:
         for idx_k, k in enumerate(pvi_data["kurva"], start=1):
@@ -664,12 +643,10 @@ def generate_excel_bm2021(r, pvi_data):
                 apply_border_range(ws2, f"A{r_i}:I{r_i}", border_cell)
 
             curr_v = r_g2 + 1
-            # Step 1 Vertikal: Perbedaan Aljabar Kelandaian (A)
             r_A = curr_v + 1
             curr_v = add_step_block(ws2, curr_v, 1, "Menghitung Perbedaan Aljabar Kelandaian (A)", [
                 (False, "A = g2 - g1 (%)", f"=H{r_g2}-H{r_g1}", '0.00" %"', False)
             ])
-            # Step 2 Vertikal: Panjang Lengkung Vertikal Minimum (Lv min) berdasarkan Jh
             r_lv_jh = curr_v + 2
             r_lv_vr = curr_v + 4
             curr_v = add_step_block(ws2, curr_v, 2, "Menghitung Panjang Lengkung Vertikal Minimum (Lv min)", [
@@ -684,23 +661,20 @@ def generate_excel_bm2021(r, pvi_data):
                 (True, "Berdasarkan Syarat Kenyamanan & Kecepatan Rencana (Vr)", None, None, False),
                 (False, "Lv_syarat = MAX(0.6 × Vr, Vr × 3 / 3.6)", "=MAX(0.6*D2, D2*3/3.6)", '0.00" m"', False),
             ])
-            # Step 3 Vertikal: Menentukan Lv Rencana (Dibulatkan kelipatan 10 m)
             r_lv_pakai = curr_v + 1
             curr_v = add_step_block(ws2, curr_v, 3, "Menentukan Panjang Lengkung Vertikal Rencana (Lv)", [
                 (False, "Lv rencana ≥ MAX(Lv_Jh, Lv_syarat), diambil Lv rencana", f"=CEILING(MAX(H{r_lv_jh}, H{r_lv_vr}), 10)", '0.00" m"', True)
             ])
-            # Step 4 Vertikal: Pergeseran Vertikal (Ev)
             curr_v = add_step_block(ws2, curr_v, 4, "Menghitung Pergeseran Vertikal dari PVI (Ev)", [
                 (False, "Ev = (|A| × Lv) / 800", f"=(ABS(H{r_A})*H{r_lv_pakai})/800", '0.000" m"', False)
             ])
-            # Step 5 Vertikal: Stasioning & Elevasi Titik Penting (BVC, PVI, EVC)
             curr_v = add_step_block(ws2, curr_v, 5, "Menentukan Stasioning & Elevasi Titik Penting (BVC & EVC)", [
                 (False, "STA BVC (Awal Lengkung) = STA PVI - Lv/2", f"=D{r_sta}-(H{r_lv_pakai}/2)", '0.00" m"', False),
                 (False, "STA EVC (Akhir Lengkung) = STA PVI + Lv/2", f"=D{r_sta}+(H{r_lv_pakai}/2)", '0.00" m"', False),
                 (False, "Elevasi BVC = Elevasi PVI - g1 × (Lv/2)", f"=D{r_el}-D{r_g1}*(H{r_lv_pakai}/2)", '0.000" m"', False),
                 (False, "Elevasi EVC = Elevasi PVI + g2 × (Lv/2)", f"=D{r_el}+D{r_g2}*(H{r_lv_pakai}/2)", '0.000" m"', False),
             ])
-            curr_v += 1  # Jarak 1 baris antar PVI
+            curr_v += 1
     else:
         ws2["A7"] = "Tidak ada titik belok vertikal (PVI) dengan perubahan kelandaian."
 
@@ -709,14 +683,41 @@ def generate_excel_bm2021(r, pvi_data):
     return buf.getvalue()
 
 
-def export_dxf_full_autocad(x_h, y_h, z_e, s_v, r_dict, B_w, nx_v, ny_v):
-    # Hitung koordinat tepi kiri & kanan (2D Denah)
+def export_dxf_full_autocad(x_h, y_h, s_v, r_dict, B_w, nx_v, ny_v, sg_val):
+    """Membuat file AutoCAD R2010 (.DXF) yang berisi:
+    1. Gambar Detail Denah Tikungan (2D)
+    2. Diagram Superelevasi (Rotasi pada Sumbu Jalan)
+    """
+    doc = ezdxf.new("R2010")
+    msp = doc.modelspace()
+
+    # Buat Layer Terstruktur dengan Warna Kontras
+    layers = [
+        ("AS_JALAN", 7),            # Putih/Hitam
+        ("TEPI_PERKERASAN", 8),     # Abu-abu
+        ("GARIS_TANGEN", 5),        # Biru
+        ("JARI_JARI", 3),           # Hijau
+        ("ANOTASI_STA", 1),         # Merah
+        ("SUPERELEVASI_LUAR", 1),   # Merah
+        ("SUPERELEVASI_DALAM", 5),  # Biru
+    ]
+    for name, color in layers:
+        if name not in doc.layers:
+            doc.layers.add(name, color=color)
+
+    # =========================================================================
+    # BAGIAN 1: GAMBAR DETAIL DENAH TIKUNGAN (2D)
+    # =========================================================================
     xl = x_h + (B_w / 2.0) * nx_v
     yl = y_h + (B_w / 2.0) * ny_v
     xr = x_h - (B_w / 2.0) * nx_v
     yr = y_h - (B_w / 2.0) * ny_v
 
-    # Hitung titik-titik utama tikungan
+    msp.add_lwpolyline(list(zip(x_h, y_h)), dxfattribs={"layer": "AS_JALAN"})
+    msp.add_lwpolyline(list(zip(xl, yl)), dxfattribs={"layer": "TEPI_PERKERASAN"})
+    msp.add_lwpolyline(list(zip(xr, yr)), dxfattribs={"layer": "TEPI_PERKERASAN"})
+
+    # Garis Singgung Tangen & Titik PI
     idx_start = int(np.argmin(np.abs(s_v - 0.0)))
     idx_end = int(np.argmin(np.abs(s_v - r_dict["Ltot"])))
     dx_in = x_h[idx_start + 1] - x_h[idx_start]
@@ -725,97 +726,179 @@ def export_dxf_full_autocad(x_h, y_h, z_e, s_v, r_dict, B_w, nx_v, ny_v):
     x_pi = x_h[idx_start] + r_dict["T"] * math.cos(ang_in)
     y_pi = y_h[idx_start] + r_dict["T"] * math.sin(ang_in)
 
-    # Titik pusat lingkaran (O)
+    msp.add_lwpolyline(
+        [(float(x_h[idx_start]), float(y_h[idx_start])), (float(x_pi), float(y_pi)), (float(x_h[idx_end]), float(y_h[idx_end]))],
+        dxfattribs={"layer": "GARIS_TANGEN"}
+    )
+    msp.add_circle((float(x_pi), float(y_pi)), radius=1.2, dxfattribs={"layer": "ANOTASI_STA"})
+    msp.add_text(
+        f"PI | Delta={r_dict['delta']:.1f} deg | STA {sta_str(r_dict['sta_pi'])}",
+        dxfattribs={"layer": "ANOTASI_STA", "height": 2.5}
+    ).set_placement((float(x_pi) + 2.5, float(y_pi) + 2.5))
+
+    # Pusat Lingkaran (O) & Garis Jari-Jari Rc
     mid_idx = idx_start if r_dict["jenis"].startswith("Full") else int(np.argmin(np.abs(s_v - (r_dict["Ltot"] / 2.0))))
-    sg_dir = 1.0 if (y_h[idx_end] - y_h[idx_start]) >= 0 else -1.0
-    x_center = x_h[mid_idx] + sg_dir * r_dict["Rc"] * nx_v[mid_idx]
-    y_center = y_h[mid_idx] + sg_dir * r_dict["Rc"] * ny_v[mid_idx]
+    x_center = float(x_h[mid_idx] + sg_val * r_dict["Rc"] * nx_v[mid_idx])
+    y_center = float(y_h[mid_idx] + sg_val * r_dict["Rc"] * ny_v[mid_idx])
 
-    # Batas bounding box murni untuk Denah Tikungan 2D
-    all_x = np.concatenate([x_h, xl, xr, [x_pi, x_center]])
-    all_y = np.concatenate([y_h, yl, yr, [y_pi, y_center]])
-    xmin, xmax = float(np.min(all_x)) - 20.0, float(np.max(all_x)) + 20.0
-    ymin, ymax = float(np.min(all_y)) - 20.0, float(np.max(all_y)) + 20.0
+    msp.add_line((float(x_h[mid_idx]), float(y_h[mid_idx])), (x_center, y_center), dxfattribs={"layer": "JARI_JARI"})
+    msp.add_circle((x_center, y_center), radius=1.5, dxfattribs={"layer": "JARI_JARI"})
+    msp.add_text(
+        f"O (Rc = {r_dict['Rc']:.1f} m)",
+        dxfattribs={"layer": "JARI_JARI", "height": 2.5}
+    ).set_placement((x_center + 2.5, y_center))
 
-    lines = [
-        "0", "SECTION", "2", "HEADER",
-        "9", "$ACADVER", "1", "AC1009",
-        "9", "$INSBASE", "10", "0.0", "20", "0.0", "30", "0.0",
-        "9", "$EXTMIN", "10", f"{xmin:.3f}", "20", f"{ymin:.3f}", "30", "0.0",
-        "9", "$EXTMAX", "10", f"{xmax:.3f}", "20", f"{ymax:.3f}", "30", "0.0",
-        "9", "$LIMMIN", "10", f"{xmin:.3f}", "20", f"{ymin:.3f}",
-        "9", "$LIMMAX", "10", f"{xmax:.3f}", "20", f"{ymax:.3f}",
-        "0", "ENDSEC",
+    # Patok Stasioning setiap 50 m
+    sta_min_plot = math.ceil((r_dict["sta_awal"] + s_v[0]) / 50.0) * 50.0
+    sta_max_plot = math.floor((r_dict["sta_awal"] + s_v[-1]) / 50.0) * 50.0
+    tick_half = max(B_w * 0.85, 5.5)
+    for st_val in np.arange(sta_min_plot, sta_max_plot + 1, 50.0):
+        s_rel = st_val - r_dict["sta_awal"]
+        if s_v[0] <= s_rel <= s_v[-1]:
+            idx_t = int(np.argmin(np.abs(s_v - s_rel)))
+            xt0, yt0 = float(x_h[idx_t]), float(y_h[idx_t])
+            nxt, nyt = float(nx_v[idx_t]), float(ny_v[idx_t])
+            msp.add_line(
+                (xt0 - tick_half * nxt, yt0 - tick_half * nyt),
+                (xt0 + tick_half * nxt, yt0 + tick_half * nyt),
+                dxfattribs={"layer": "TEPI_PERKERASAN"}
+            )
+            lbl_side = -sg_val
+            msp.add_text(
+                sta_str(st_val, d=0),
+                dxfattribs={"layer": "TEPI_PERKERASAN", "height": 1.6}
+            ).set_placement((xt0 + lbl_side * (tick_half + 2.5) * nxt, yt0 + lbl_side * (tick_half + 2.5) * nyt))
 
-        "0", "SECTION", "2", "TABLES",
-        "0", "TABLE", "2", "LTYPE", "70", "1",
-        "0", "LTYPE", "2", "CONTINUOUS", "70", "0", "3", "Solid line", "72", "65", "73", "0", "40", "0.0",
-        "0", "ENDTAB",
-
-        "0", "TABLE", "2", "LAYER", "70", "6",
-        "0", "LAYER", "2", "0", "70", "0", "62", "7", "6", "CONTINUOUS",
-        "0", "LAYER", "2", "AS_JALAN", "70", "0", "62", "7", "6", "CONTINUOUS",
-        "0", "LAYER", "2", "TEPI_PERKERASAN", "70", "0", "62", "8", "6", "CONTINUOUS",
-        "0", "LAYER", "2", "GARIS_TANGEN", "70", "0", "62", "5", "6", "CONTINUOUS",
-        "0", "LAYER", "2", "JARI_JARI", "70", "0", "62", "3", "6", "CONTINUOUS",
-        "0", "LAYER", "2", "ANOTASI_STA", "70", "0", "62", "1", "6", "CONTINUOUS",
-        "0", "ENDTAB",
-        "0", "ENDSEC",
-
-        "0", "SECTION", "2", "ENTITIES"
-    ]
-
-    def add_2d_polyline(layer_name, xs, ys):
-        lines.extend([
-            "0", "POLYLINE", "8", layer_name, "66", "1", "70", "0",
-            "10", "0.0", "20", "0.0", "30", "0.0"
-        ])
-        for x, y in zip(xs, ys):
-            lines.extend([
-                "0", "VERTEX", "8", layer_name,
-                "10", f"{float(x):.4f}", "20", f"{float(y):.4f}", "30", "0.0"
-            ])
-        lines.extend(["0", "SEQEND", "8", layer_name])
-
-    def add_text(layer_name, x, y, height, text_val):
-        lines.extend([
-            "0", "TEXT", "8", layer_name,
-            "10", f"{float(x):.4f}", "20", f"{float(y):.4f}", "30", "0.0",
-            "40", f"{height:.2f}",
-            "1", str(text_val)
-        ])
-
-    # 1. As Jalan & Tepi Perkerasan Kiri/Kanan (2D)
-    add_2d_polyline("AS_JALAN", x_h, y_h)
-    add_2d_polyline("TEPI_PERKERASAN", xl, yl)
-    add_2d_polyline("TEPI_PERKERASAN", xr, yr)
-
-    # 2. Garis Tangen & Jari-Jari Rc
-    add_2d_polyline("GARIS_TANGEN", [x_h[idx_start], x_pi, x_h[idx_end]], [y_h[idx_start], y_pi, y_h[idx_end]])
-    add_2d_polyline("JARI_JARI", [x_h[mid_idx], x_center], [y_h[mid_idx], y_center])
-
-    # 3. Label Titik PI & Pusat R
-    add_text("ANOTASI_STA", x_pi + 2.0, y_pi + 2.0, 2.5, f"PI (STA {sta_str(r_dict['sta_pi'])}, Delta={r_dict['delta']:.1f} deg)")
-    add_text("JARI_JARI", x_center + 2.0, y_center, 2.5, f"O (R = {r_dict['Rc']:.1f} m)")
-
-    # 4. Titik Utama Tikungan (TS/SC/CS/ST atau TC/CT)
+    # Titik Utama Tikungan (TS/SC/CS/ST atau TC/CT)
+    pts_info = []
     if r_dict["jenis"].startswith("Full"):
-        add_text("ANOTASI_STA", x_h[idx_start], y_h[idx_start] - 4.0, 2.2, f"TC {sta_str(r_dict['sta_awal'])}")
-        add_text("ANOTASI_STA", x_h[idx_end], y_h[idx_end] - 4.0, 2.2, f"CT {sta_str(r_dict['sta_akhir'])}")
+        pts_info = [
+            (idx_start, f"TC {sta_str(r_dict['sta_awal'])}"),
+            (idx_end, f"CT {sta_str(r_dict['sta_akhir'])}")
+        ]
     else:
-        add_text("ANOTASI_STA", x_h[idx_start], y_h[idx_start] - 4.0, 2.2, f"TS {sta_str(r_dict['sta_awal'])}")
-        add_text("ANOTASI_STA", x_h[idx_end], y_h[idx_end] - 4.0, 2.2, f"ST {sta_str(r_dict['sta_akhir'])}")
+        pts_info = [
+            (idx_start, f"TS {sta_str(r_dict['sta_awal'])}"),
+            (idx_end, f"ST {sta_str(r_dict['sta_akhir'])}")
+        ]
         if r_dict["jenis"].startswith("Spiral-Spiral"):
             idx_m = int(np.argmin(np.abs(s_v - r_dict["Ls"])))
-            add_text("ANOTASI_STA", x_h[idx_m], y_h[idx_m] - 4.0, 2.2, f"SC=CS {sta_str(r_dict['sta_awal'] + r_dict['Ls'])}")
+            pts_info.append((idx_m, f"SC=CS {sta_str(r_dict['sta_awal'] + r_dict['Ls'])}"))
         else:
             idx_sc = int(np.argmin(np.abs(s_v - r_dict["Ls"])))
             idx_cs = int(np.argmin(np.abs(s_v - (r_dict["Ls"] + r_dict["Lc"]))))
-            add_text("ANOTASI_STA", x_h[idx_sc], y_h[idx_sc] - 4.0, 2.2, f"SC {sta_str(r_dict['sta_awal'] + r_dict['Ls'])}")
-            add_text("ANOTASI_STA", x_h[idx_cs], y_h[idx_cs] - 4.0, 2.2, f"CS {sta_str(r_dict['sta_awal'] + r_dict['Ls'] + r_dict['Lc'])}")
+            pts_info.append((idx_sc, f"SC {sta_str(r_dict['sta_awal'] + r_dict['Ls'])}"))
+            pts_info.append((idx_cs, f"CS {sta_str(r_dict['sta_awal'] + r_dict['Ls'] + r_dict['Lc'])}"))
 
-    lines.extend(["0", "ENDSEC", "0", "EOF"])
-    return "\r\n".join(lines) + "\r\n"
+    for idx_p, lbl_p in pts_info:
+        px, py = float(x_h[idx_p]), float(y_h[idx_p])
+        msp.add_circle((px, py), radius=1.0, dxfattribs={"layer": "ANOTASI_STA"})
+        msp.add_text(lbl_p, dxfattribs={"layer": "ANOTASI_STA", "height": 2.2}).set_placement((px + 1.5, py - 4.0))
+
+    msp.add_text(
+        f"1. DENAH TRASE TIKUNGAN - {r_dict['jenis'].upper()}",
+        dxfattribs={"layer": "AS_JALAN", "height": 4.0}
+    ).set_placement((float(np.min(x_h)), float(np.max(y_h)) + 15.0))
+
+    # =========================================================================
+    # BAGIAN 2: DIAGRAM SUPERELEVASI (DILETAKKAN DI BAWAH DENAH)
+    # =========================================================================
+    e_desain = r_dict["e"] * 100.0
+    en_val = r_dict["en"] * 100.0
+    ls_val = r_dict["Ls_sup"]
+    ltot_val = r_dict["Ltot"]
+    sta_0 = r_dict["sta_awal"]
+
+    if r_dict["jenis"].startswith("Full"):
+        s_start_trans = -(2.0 / 3.0) * ls_val
+        s_full_start = (1.0 / 3.0) * ls_val
+        s_full_end = ltot_val - (1.0 / 3.0) * ls_val
+        s_end_trans = ltot_val + (2.0 / 3.0) * ls_val
+        krit_s = [s_start_trans, 0.0, s_full_start, s_full_end, ltot_val, s_end_trans]
+        krit_lbl = ["Awal Transisi", "TC", "e penuh", "e penuh", "CT", "Akhir Transisi"]
+    else:
+        s_start_trans = 0.0
+        s_full_start = ls_val
+        s_full_end = ltot_val - ls_val
+        s_end_trans = ltot_val
+        if r_dict["jenis"].startswith("Spiral-Spiral"):
+            krit_s = [0.0, ls_val, ltot_val]
+            krit_lbl = ["TS", "SC=CS", "ST"]
+        else:
+            krit_s = [0.0, ls_val, ltot_val - ls_val, ltot_val]
+            krit_lbl = ["TS", "SC", "CS", "ST"]
+
+    trans_len = max(s_full_start - s_start_trans, 1e-6)
+    margin_s = max(40.0, 0.25 * ltot_val)
+    s_min_sup = min(0.0, s_start_trans) - margin_s
+    s_max_sup = max(ltot_val, s_end_trans) + margin_s
+
+    s_zero_1 = s_start_trans + trans_len * (en_val / (e_desain + en_val))
+    s_zero_2 = s_end_trans - trans_len * (en_val / (e_desain + en_val))
+    s_crown_1 = s_start_trans + trans_len * ((2 * en_val) / (e_desain + en_val))
+    s_crown_2 = s_end_trans - trans_len * ((2 * en_val) / (e_desain + en_val))
+
+    key_nodes = np.unique(np.sort([
+        s_min_sup, s_start_trans, s_zero_1, s_crown_1,
+        s_full_start, s_full_end, s_crown_2, s_zero_2, s_end_trans, s_max_sup
+    ]))
+
+    e_luar = np.zeros_like(key_nodes)
+    e_dalam = np.zeros_like(key_nodes)
+    for i, sv in enumerate(key_nodes):
+        if sv <= s_start_trans or sv >= s_end_trans:
+            e_luar[i] = -en_val
+            e_dalam[i] = -en_val
+        elif s_start_trans < sv < s_full_start:
+            frac = (sv - s_start_trans) / trans_len
+            e_luar[i] = -en_val + frac * (e_desain + en_val)
+            e_dalam[i] = min(-en_val, -e_luar[i])
+        elif s_full_start <= sv <= s_full_end:
+            e_luar[i] = e_desain
+            e_dalam[i] = -e_desain
+        elif s_full_end < sv < s_end_trans:
+            frac = (s_end_trans - sv) / trans_len
+            e_luar[i] = -en_val + frac * (e_desain + en_val)
+            e_dalam[i] = min(-en_val, -e_luar[i])
+
+    # Posisikan Diagram Superelevasi rapi di bawah denah
+    x_base_sup = float(np.min(x_h))
+    y_base_sup = float(np.min(y_h)) - 90.0
+    v_scale = 3.0  # Skala vertikal 1% = 3 meter di gambar CAD agar proporsional
+
+    x_sup_pts = [x_base_sup + float(sv - s_min_sup) for sv in key_nodes]
+    y_luar_pts = [y_base_sup + float(ev) * v_scale for ev in e_luar]
+    y_dalam_pts = [y_base_sup + float(ev) * v_scale for ev in e_dalam]
+
+    # Garis Sumbu 0%
+    msp.add_line((x_sup_pts[0], y_base_sup), (x_sup_pts[-1], y_base_sup), dxfattribs={"layer": "AS_JALAN"})
+    # Kurva Tepi Luar (+e) & Tepi Dalam (-e)
+    msp.add_lwpolyline(list(zip(x_sup_pts, y_luar_pts)), dxfattribs={"layer": "SUPERELEVASI_LUAR"})
+    msp.add_lwpolyline(list(zip(x_sup_pts, y_dalam_pts)), dxfattribs={"layer": "SUPERELEVASI_DALAM"})
+
+    # Garis Vertikal & Anotasi Titik Kritis Superelevasi
+    y_line_top = y_base_sup + (e_desain + 3.0) * v_scale
+    y_line_bot = y_base_sup - (e_desain + 3.0) * v_scale
+    for ks, klbl in zip(krit_s, krit_lbl):
+        xk = x_base_sup + float(ks - s_min_sup)
+        msp.add_line((xk, y_line_bot), (xk, y_line_top), dxfattribs={"layer": "TEPI_PERKERASAN"})
+        msp.add_text(
+            f"{klbl} ({sta_str(sta_0 + ks)})",
+            dxfattribs={"layer": "ANOTASI_STA", "height": 1.8}
+        ).set_placement((xk + 0.8, y_line_top + 1.5))
+
+    mid_x_sup = x_base_sup + float(((s_full_start + s_full_end) / 2.0) - s_min_sup)
+    msp.add_text(f"+e = +{e_desain:.2f}%", dxfattribs={"layer": "SUPERELEVASI_LUAR", "height": 2.2}).set_placement((mid_x_sup, y_base_sup + e_desain * v_scale + 2.0))
+    msp.add_text(f"-e = -{e_desain:.2f}%", dxfattribs={"layer": "SUPERELEVASI_DALAM", "height": 2.2}).set_placement((mid_x_sup, y_base_sup - e_desain * v_scale - 4.0))
+    msp.add_text(f"en = -{en_val:.1f}%", dxfattribs={"layer": "AS_JALAN", "height": 2.0}).set_placement((x_sup_pts[0] + 2.0, y_base_sup - en_val * v_scale - 3.5))
+    msp.add_text(
+        "2. DIAGRAM SUPERELEVASI (ROTASI PADA SUMBU JALAN)",
+        dxfattribs={"layer": "AS_JALAN", "height": 4.0}
+    ).set_placement((x_base_sup, y_line_top + 10.0))
+
+    stream = io.StringIO()
+    doc.write(stream)
+    return stream.getvalue().encode("utf-8")
 
 
 # ----------------------------------------------------------------------------
@@ -832,14 +915,13 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 # ----------------------------------------------------------------------------
-# TAB 1: DENAH TIKUNGAN 2D (DETAIL SEPERTI REFERENSI)
+# TAB 1: DENAH TIKUNGAN 2D
 # ----------------------------------------------------------------------------
 with tab1:
     st.markdown("<h3 style='color: #3A0056;'>📍 Visualisasi Denah Trase Tikungan 2D</h3>", unsafe_allow_html=True)
     
     fig_2d = go.Figure()
     
-    # 1. Badan Jalan (Arsiran Abu-abu Lembut) + Tepi Kiri & Kanan
     xl, yl = x_horiz + (B / 2) * nx, y_horiz + (B / 2) * ny
     xr, yr = x_horiz - (B / 2) * nx, y_horiz - (B / 2) * ny
     
@@ -854,11 +936,8 @@ with tab1:
     ))
     fig_2d.add_trace(go.Scatter(x=xl, y=yl, mode='lines', name='Tepi Perkerasan', line=dict(color='#616161', width=1.5)))
     fig_2d.add_trace(go.Scatter(x=xr, y=yr, mode='lines', showlegend=False, line=dict(color='#616161', width=1.5)))
-    
-    # 2. As Jalan (Hitam Pekat & Jelas)
     fig_2d.add_trace(go.Scatter(x=x_horiz, y=y_horiz, mode='lines', name='As jalan', line=dict(color='#111111', width=3)))
     
-    # 3. Garis Singgung Tangen (Biru Putus-putus) & Titik PI (Kotak Hitam)
     idx_start = np.argmin(np.abs(s_vals - 0))
     idx_end = np.argmin(np.abs(s_vals - r["Ltot"]))
     
@@ -894,7 +973,6 @@ with tab1:
         bordercolor="#BDBDBD", borderwidth=1, borderpad=4
     )
     
-    # 4. Titik Pusat Lingkaran (O) & Garis Jari-jari Hijau Putus-putus
     if r["jenis"].startswith("Full"):
         mid_idx = idx_start
     else:
@@ -926,7 +1004,6 @@ with tab1:
         borderpad=2
     )
     
-    # 5. Garis Patok Stasioning Minor setiap 50 m (0+050, 0+100, dst.)
     sta_min_plot = math.ceil((r["sta_awal"] + s_vals[0]) / 50.0) * 50.0
     sta_max_plot = math.floor((r["sta_awal"] + s_vals[-1]) / 50.0) * 50.0
     tick_stas = np.arange(sta_min_plot, sta_max_plot + 1, 50.0)
@@ -958,7 +1035,6 @@ with tab1:
                 borderpad=1
             )
 
-    # 6. Titik-Titik Utama Tikungan (Merah Bulat + Label Merah Tua Berlatar Putih)
     fc = r["jenis"].startswith("Full")
     is_ss = r["jenis"].startswith("Spiral-Spiral")
     
@@ -1034,7 +1110,7 @@ with tab1:
     st.plotly_chart(fig_2d, use_container_width=True)
 
 # ----------------------------------------------------------------------------
-# TAB 2: DIAGRAM SUPERELEVASI (DETAIL ROTASI PADA SUMBU JALAN)
+# TAB 2: DIAGRAM SUPERELEVASI
 # ----------------------------------------------------------------------------
 with tab2:
     st.markdown("<h3 style='color: #3A0056;'>📈 Diagram Superelevasi (Rotasi pada Sumbu Jalan)</h3>", unsafe_allow_html=True)
@@ -1219,7 +1295,7 @@ with tab2:
     st.plotly_chart(fig_sup, use_container_width=True)
 
 # ----------------------------------------------------------------------------
-# TAB 3: PROFIL MEMANJANG & SIMULASI 3D (SMOOTH PLOTLY ANIMATION)
+# TAB 3: SIMULASI 3D MOBIL JALAN
 # ----------------------------------------------------------------------------
 with tab3:
     st.markdown("<h3 style='color: #3A0056;'>🚘 Visualisasi 3D Jalan & Simulator Mobil Jalan Otomatis</h3>", unsafe_allow_html=True)
@@ -1262,16 +1338,13 @@ with tab3:
         
     st.markdown(status_box, unsafe_allow_html=True)
 
-    # Buat sampling titik untuk frame animasi agar mulus & ringan (sekitar 60 frame)
     step_frame = max(1, len(s_vals) // 60)
     frame_indices = list(range(0, len(s_vals), step_frame))
     if frame_indices[-1] != len(s_vals) - 1:
         frame_indices.append(len(s_vals) - 1)
 
-    # Durasi per frame disesuaikan dengan kecepatan kendaraan (v_sim)
     frame_duration = max(30, int(4000 / max(v_sim, 10)))
 
-    # Susun Frames Animasi Mobil
     frames = []
     slider_steps = []
     for idx in frame_indices:
@@ -1298,7 +1371,6 @@ with tab3:
 
     fig_3d = go.Figure(
         data=[
-            # Trace 0: Mobil Simulasi (yang bergerak antar frame)
             go.Scatter3d(
                 x=[x_horiz[0]], y=[y_horiz[0]], z=[z_elev[0] + 1.2],
                 mode='markers+text', name='Mobil Simulasi',
@@ -1307,12 +1379,10 @@ with tab3:
                 textposition="top center",
                 textfont=dict(color="#111111", size=12)
             ),
-            # Trace 1: As Jalan 3D
             go.Scatter3d(
                 x=x_horiz, y=y_horiz, z=z_elev, mode='lines', name='As Jalan 3D',
                 line=dict(color='#3A0056', width=6)
             ),
-            # Trace 2 & 3: Tepi Kiri & Kanan 3D
             go.Scatter3d(
                 x=xl, y=yl, z=z_elev, mode='lines', name='Tepi Kiri 3D',
                 line=dict(color='#C2185B', width=3)
@@ -1427,10 +1497,10 @@ with tab4:
         )
         st.plotly_chart(fig_prof, use_container_width=True)
 
-    dxf_out = export_dxf_full_autocad(x_horiz, y_horiz, z_elev, s_vals, r, B, nx, ny)
+    dxf_out = export_dxf_full_autocad(x_horiz, y_horiz, s_vals, r, B, nx, ny, sg)
     st.download_button(
-        "📐 Unduh Denah Tikungan 2D AutoCAD (.DXF)",
-        dxf_out, file_name="Denah_Tikungan_2D.dxf", mime="application/dxf",
+        "📐 Unduh Hasil Gambar AutoCAD (.DXF — Tikungan Detail & Diagram Superelevasi)",
+        dxf_out, file_name="Geometri_Jalan_BinaMarga.dxf", mime="application/dxf",
         use_container_width=True
     )
 

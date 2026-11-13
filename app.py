@@ -149,7 +149,22 @@ if not st.session_state.authenticated:
     st.markdown("---")
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        pwd_input = st.text_input("Masukkan Password Akses:", type="password", placeholder="Ketik password di sini...")
+        st.markdown(
+            """
+            <div style="background-color: #FCE4EC; border: 1.5px solid #F48FB1; border-radius: 10px; 
+                        padding: 12px 16px; margin-bottom: 12px; color: #880E4F; font-size: 14px; text-align: center;">
+                💡 <b>Petunjuk password:</b> lihat bagian pojok kanan atas
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        st.markdown("<p style='color: #3A0056; font-weight: 700; margin-bottom: 4px;'>Masukkan Password Akses:</p>", unsafe_allow_html=True)
+        pwd_input = st.text_input(
+            "Masukkan Password Akses:",
+            type="password",
+            placeholder="Ketik password di sini...",
+            label_visibility="collapsed"
+        )
         if st.button("Masuk Aplikasi 🚀", use_container_width=True):
             if pwd_input.strip() == "cantikaaa27":
                 st.session_state.authenticated = True
